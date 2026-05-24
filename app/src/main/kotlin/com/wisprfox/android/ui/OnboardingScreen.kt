@@ -18,7 +18,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import com.wisprfox.android.BuildConfig
+import com.wisprfox.android.settings.FamilyUnlock
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,9 +56,40 @@ fun OnboardingScreen(onDone: () -> Unit) {
         Image(painterResource(R.drawable.fox_sitting), contentDescription = null, modifier = Modifier.size(120.dp))
         Text("Welcome to wispr-fox", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text(
-            "Tap the floating fox, speak, and your words land in whatever you're typing. Long-press the fox to pick Raw, Cleaned, or Reformatted.",
+            "Tap the floating fox, speak, and your words land in whatever you're typing. Long-press the fox to pick Raw, Clean, or Draft.",
             style = MaterialTheme.typography.bodyMedium,
         )
+
+        // Easy path for friends & family: a setup code unlocks the owner's keys.
+        if (BuildConfig.FAMILY_BLOB.isNotBlank()) {
+            HorizontalDivider()
+            Text("Have a setup code?", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text("Enter the code you were given to set up automatically — no API keys needed.", style = MaterialTheme.typography.bodySmall)
+            var code by remember { mutableStateOf("") }
+            var codeStatus by remember { mutableStateOf<String?>(null) }
+            OutlinedTextField(
+                value = code,
+                onValueChange = { code = it },
+                label = { Text("Setup code") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Button(
+                enabled = code.isNotBlank(),
+                onClick = {
+                    val keys = FamilyUnlock.decrypt(BuildConfig.FAMILY_BLOB, code.trim())
+                    if (keys != null && FamilyUnlock.apply(keys, container.secrets)) {
+                        groqSaved = true
+                        codeStatus = "Unlocked ✓ — you're all set"
+                    } else {
+                        codeStatus = "That code didn't work — check and try again"
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Unlock") }
+            codeStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            Text("— or set up your own keys below —", style = MaterialTheme.typography.bodySmall)
+        }
 
         HorizontalDivider()
         Text("1. Add your Groq API key", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)

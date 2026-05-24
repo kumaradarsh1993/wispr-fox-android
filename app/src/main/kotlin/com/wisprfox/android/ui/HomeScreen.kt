@@ -54,7 +54,11 @@ import com.wisprfox.android.overlay.AvatarView
 import com.wisprfox.android.provider.DictationMode
 import com.wisprfox.android.settings.AppSettings
 import com.wisprfox.android.settings.Avatar
+import com.wisprfox.android.settings.SecureKeyStore
 import kotlinx.coroutines.launch
+
+private const val STT_TURBO = "whisper-large-v3-turbo"
+private const val STT_ACCURATE = "whisper-large-v3"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -129,6 +133,40 @@ fun HomeScreen(onOpenHistory: () -> Unit, onOpenSettings: () -> Unit) {
                         label = { Text(mode.label) },
                     )
                 }
+            }
+
+            Spacer(Modifier.height(4.dp))
+            Text("Transcription model", style = MaterialTheme.typography.labelLarge)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = settings.sttModel == STT_TURBO,
+                    onClick = { scope.launch { container.settingsStore.setSttModel(STT_TURBO) } },
+                    label = { Text("Turbo") },
+                )
+                FilterChip(
+                    selected = settings.sttModel == STT_ACCURATE,
+                    onClick = { scope.launch { container.settingsStore.setSttModel(STT_ACCURATE) } },
+                    label = { Text("Accurate") },
+                )
+            }
+
+            Text("Cleanup model", style = MaterialTheme.typography.labelLarge)
+            val geminiReady = container.secrets.has(SecureKeyStore.Key.GeminiLlm)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = settings.llmProvider == AppSettings.PROVIDER_GROQ,
+                    onClick = { scope.launch { container.settingsStore.setLlmProvider(AppSettings.PROVIDER_GROQ) } },
+                    label = { Text("Llama 70B") },
+                )
+                FilterChip(
+                    selected = settings.llmProvider == AppSettings.PROVIDER_GEMINI && geminiReady,
+                    enabled = geminiReady,
+                    onClick = { scope.launch { container.settingsStore.setLlmProvider(AppSettings.PROVIDER_GEMINI) } },
+                    label = { Text("Gemini Flash") },
+                )
+            }
+            if (!geminiReady) {
+                Text("Add a Gemini key (Settings) to enable Gemini.", style = MaterialTheme.typography.bodySmall)
             }
 
             val recording = state.pipeline == PipelineState.RECORDING

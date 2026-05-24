@@ -34,6 +34,10 @@ android {
             arg("room.schemaLocation", "$projectDir/schemas")
             arg("room.incremental", "true")
         }
+
+        // Passphrase-encrypted owner keys for friends & family builds. Safe to
+        // ship in release (useless without the passphrase). Empty when absent.
+        buildConfigField("String", "FAMILY_BLOB", "\"${devKey("familyBlob")}\"")
     }
 
     buildTypes {
