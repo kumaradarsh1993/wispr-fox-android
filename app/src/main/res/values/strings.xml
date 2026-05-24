@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">wispr-fox</string>
+    <string name="accessibility_label">wispr-fox auto-paste</string>
+    <string name="accessibility_description">Lets wispr-fox drop your dictated text straight into the field you are typing in. wispr-fox never reads or acts on screen content on its own — it only pastes when you finish a recording. You can turn this off any time; your text still goes to the clipboard.</string>
+</resources>
