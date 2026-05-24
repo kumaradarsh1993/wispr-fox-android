@@ -51,21 +51,27 @@ fun ClippyAvatar(state: PipelineState, modifier: Modifier) {
 
         val body = PathParser().parsePathString(BODY_PATH).toPath()
         body.asAndroidPath().transform(androidMatrix(sc, offX, offY))
-        drawPath(
-            body,
-            color = INK,
-            style = Stroke(width = 6f * sc, cap = StrokeCap.Round, join = StrokeJoin.Round),
-        )
+        // White halo FIRST (the desktop's stroke-width-11 white outline) so the
+        // black paperclip reads cleanly on dark backgrounds — this was the
+        // "faint white glow around the edges" nuance. A soft wide low-alpha
+        // pass approximates the desktop's white drop-shadow glow.
+        drawPath(body, color = Color.White.copy(alpha = 0.45f), style = Stroke(width = 15f * sc, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawPath(body, color = Color.White, style = Stroke(width = 11f * sc, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        // Black body on top.
+        drawPath(body, color = INK, style = Stroke(width = 6f * sc, cap = StrokeCap.Round, join = StrokeJoin.Round))
 
-        // Brows.
-        drawBrow(p(36f, 36f), p(42f, 32f), p(48f, 36f), sc)
-        drawBrow(p(60f, 36f), p(66f, 32f), p(72f, 36f), sc)
+        // Brows — white halo then ink, same as the body.
+        drawBrow(p(36f, 36f), p(42f, 32f), p(48f, 36f), sc, Color.White, 7.5f)
+        drawBrow(p(60f, 36f), p(66f, 32f), p(72f, 36f), sc, Color.White, 7.5f)
+        drawBrow(p(36f, 36f), p(42f, 32f), p(48f, 36f), sc, INK, 3.5f)
+        drawBrow(p(60f, 36f), p(66f, 32f), p(72f, 36f), sc, INK, 3.5f)
 
-        // Eyes (white sclera + accent pupil).
-        drawCircle(Color.White, 8.5f * sc, p(44f, 51f))
-        drawCircle(accent, 4f * sc, p(44f, 51f))
-        drawCircle(Color.White, 8.5f * sc, p(66f, 51f))
-        drawCircle(accent, 4f * sc, p(66f, 51f))
+        // Eyes (white sclera + ink ring + accent pupil).
+        for (cx in listOf(44f, 66f)) {
+            drawCircle(Color.White, 8.5f * sc, p(cx, 51f))
+            drawCircle(INK, 8.5f * sc, p(cx, 51f), style = Stroke(width = 2f * sc))
+            drawCircle(accent, 4f * sc, p(cx, 51f))
+        }
     }
 }
 
@@ -73,11 +79,11 @@ private fun androidMatrix(sc: Float, offX: Float, offY: Float): android.graphics
     android.graphics.Matrix().apply { setScale(sc, sc); postTranslate(offX, offY) }
 
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawBrow(
-    a: Offset, c: Offset, b: Offset, sc: Float,
+    a: Offset, c: Offset, b: Offset, sc: Float, color: Color, width: Float,
 ) {
     val path = androidx.compose.ui.graphics.Path().apply {
         moveTo(a.x, a.y)
         quadraticBezierTo(c.x, c.y, b.x, b.y)
     }
-    drawPath(path, INK, style = Stroke(width = 3.5f * sc, cap = StrokeCap.Round))
+    drawPath(path, color, style = Stroke(width = width * sc, cap = StrokeCap.Round))
 }

@@ -118,6 +118,7 @@ class OverlayService : Service() {
                 val avatar by container.settingsStore.settings
                     .map { it.avatar }
                     .collectAsState(initial = com.wisprfox.android.settings.Avatar.FOX)
+                com.wisprfox.android.ui.WisprFoxTheme {
                 AvatarOverlay(
                     snapshot = state,
                     avatar = avatar,
@@ -140,6 +141,7 @@ class OverlayService : Service() {
                         )
                     },
                 )
+                }
             }
         }
 
