@@ -23,4 +23,13 @@ enum class DictationMode {
 
     /** Whether this mode runs the transcript through the cleanup LLM at all. */
     val usesLlm: Boolean get() = this != RAW
+
+    /** User-facing label. Single source of truth: Raw / Clean / Draft. */
+    val label: String
+        get() = when (this) {
+            RAW -> "Raw"
+            CLEANED -> "Clean"
+            ADVANCED -> "Advanced"
+            REFORMATTED -> "Draft"
+        }
 }

@@ -99,8 +99,8 @@ fun SettingsScreen(onBack: () -> Unit) {
             Text("What a single tap on the fox does. Long-press always offers all three.", style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ModeOption("Raw", DictationMode.RAW, settings.defaultMode) { scope.launch { container.settingsStore.setDefaultMode(it) } }
-                ModeOption("Cleaned", DictationMode.CLEANED, settings.defaultMode) { scope.launch { container.settingsStore.setDefaultMode(it) } }
-                ModeOption("Reformat", DictationMode.REFORMATTED, settings.defaultMode) { scope.launch { container.settingsStore.setDefaultMode(it) } }
+                ModeOption("Clean", DictationMode.CLEANED, settings.defaultMode) { scope.launch { container.settingsStore.setDefaultMode(it) } }
+                ModeOption("Draft", DictationMode.REFORMATTED, settings.defaultMode) { scope.launch { container.settingsStore.setDefaultMode(it) } }
             }
 
             HorizontalDivider()

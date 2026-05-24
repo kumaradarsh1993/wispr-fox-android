@@ -114,7 +114,7 @@ private fun HistoryRow(rec: Recording, player: AudioPlayerState) {
                 Column {
                     Text(timeFmt.format(Date(rec.createdAt)), fontWeight = FontWeight.SemiBold)
                     Text(
-                        "${rec.mode.label()} · ${rec.durationMs / 1000}s · ${rec.status.name.lowercase()}",
+                        "${rec.mode.label} · ${rec.durationMs / 1000}s · ${rec.status.name.lowercase()}",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -135,8 +135,8 @@ private fun HistoryRow(rec: Recording, player: AudioPlayerState) {
             } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     TabChip("Raw", tab == Tab.RAW) { tab = Tab.RAW }
-                    TabChip("Cleaned", tab == Tab.CLEANED) { tab = Tab.CLEANED }
-                    TabChip("Reformat", tab == Tab.REFORMATTED) { tab = Tab.REFORMATTED }
+                    TabChip("Clean", tab == Tab.CLEANED) { tab = Tab.CLEANED }
+                    TabChip("Draft", tab == Tab.REFORMATTED) { tab = Tab.REFORMATTED }
                 }
 
                 val text = when (tab) {
@@ -205,19 +205,12 @@ private fun TabChip(label: String, selected: Boolean, onClick: () -> Unit) {
     FilterChip(selected = selected, onClick = onClick, label = { Text(label) })
 }
 
-private enum class Tab(val label: String) { RAW("Raw"), CLEANED("Cleaned"), REFORMATTED("Reformat") }
+private enum class Tab(val label: String) { RAW("Raw"), CLEANED("Clean"), REFORMATTED("Draft") }
 
 private fun defaultTabFor(mode: DictationMode): Tab = when (mode) {
     DictationMode.RAW -> Tab.RAW
     DictationMode.CLEANED, DictationMode.ADVANCED -> Tab.CLEANED
     DictationMode.REFORMATTED -> Tab.REFORMATTED
-}
-
-private fun DictationMode.label(): String = when (this) {
-    DictationMode.RAW -> "Raw"
-    DictationMode.CLEANED -> "Cleaned"
-    DictationMode.ADVANCED -> "Advanced"
-    DictationMode.REFORMATTED -> "Reformat"
 }
 
 private val timeFmt = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())

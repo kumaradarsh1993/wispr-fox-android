@@ -21,16 +21,25 @@ fun avatarFor(state: PipelineState): Int = when (state) {
     PipelineState.ERROR -> R.drawable.fox_error
 }
 
-/** Short status label shown in the avatar's speech bubble. */
-fun bubbleLabel(state: PipelineState, elapsedMs: Long): String? = when (state) {
-    PipelineState.IDLE -> null
-    PipelineState.RECORDING -> {
-        val s = elapsedMs / 1000
-        "listening…  %d:%02d".format(s / 60, s % 60)
-    }
+/**
+ * Short status label for non-recording stages. The RECORDING bubble is handled
+ * in [AvatarOverlay] with a live ticker + cheeky commentary, so it's null here.
+ */
+fun bubbleLabel(state: PipelineState): String? = when (state) {
     PipelineState.TRANSCRIBING -> "transcribing…"
     PipelineState.CLEANING -> "polishing…"
     PipelineState.INJECTING -> "delivering…"
     PipelineState.DONE -> "done!"
     PipelineState.ERROR -> "tap to retry"
+    else -> null
+}
+
+/** Desktop-style cheeky commentary while listening, keyed on seconds elapsed. */
+fun listeningLabel(seconds: Int): String = when {
+    seconds < 12 -> "listening…"
+    seconds < 25 -> "still listening…"
+    seconds < 45 -> "wow, lots to say"
+    seconds < 70 -> "how long is this?"
+    seconds < 110 -> "okay, still here…"
+    else -> "marathon mode"
 }
