@@ -99,7 +99,7 @@ class TranscribeWorker(
         AppState.update {
             copy(
                 pipeline = PipelineState.DONE,
-                message = if (channel == DeliveryManager.Channel.ACCESSIBILITY) "Pasted" else "Copied to clipboard",
+                message = if (channel == DeliveryManager.Channel.ACCESSIBILITY) "Pasted" else "Copied — paste anywhere",
                 messageIsError = false,
                 activeRecordingId = null,
             )

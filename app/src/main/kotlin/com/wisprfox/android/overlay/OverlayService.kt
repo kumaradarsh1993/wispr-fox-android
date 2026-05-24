@@ -99,9 +99,11 @@ class OverlayService : Service() {
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT,
         ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = prefs.getInt("x", 32)
-            y = prefs.getInt("y", 240)
+            // BOTTOM-anchored: the fox is the bottom-most element, so the
+            // bubble + long-press menu expand UPWARD and the fox never moves.
+            gravity = Gravity.BOTTOM or Gravity.START
+            x = prefs.getInt("bx", 24)   // distance from left
+            y = prefs.getInt("by", 320)  // distance from bottom
         }
 
         val viewOwner = OverlayViewOwner().also { owner = it }
@@ -113,17 +115,23 @@ class OverlayService : Service() {
             setViewTreeSavedStateRegistryOwner(viewOwner)
             setContent {
                 val state by AppState.state.collectAsState()
+                val avatar by container.settingsStore.settings
+                    .map { it.avatar }
+                    .collectAsState(initial = com.wisprfox.android.settings.Avatar.FOX)
                 AvatarOverlay(
                     snapshot = state,
+                    avatar = avatar,
                     onTap = { container.controller.toggle() },
                     onPickMode = { mode -> container.controller.startMode(mode) },
                     onDrag = { dx, dy ->
-                        params.x += dx.toInt()
-                        params.y += dy.toInt()
+                        params.x = (params.x + dx.toInt()).coerceAtLeast(0)
+                        // BOTTOM gravity: dragging down lowers the window, i.e.
+                        // reduces its distance-from-bottom.
+                        params.y = (params.y - dy.toInt()).coerceAtLeast(0)
                         windowManager.updateViewLayout(this, params)
                     },
                     onDragEnd = {
-                        prefs.edit().putInt("x", params.x).putInt("y", params.y).apply()
+                        prefs.edit().putInt("bx", params.x).putInt("by", params.y).apply()
                     },
                     onOpenApp = {
                         startActivity(

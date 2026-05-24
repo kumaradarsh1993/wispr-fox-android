@@ -5,9 +5,9 @@ import android.content.Intent
 import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,9 +16,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
@@ -40,16 +42,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.wisprfox.android.WisprFoxApp
 import com.wisprfox.android.core.AppState
 import com.wisprfox.android.core.PipelineState
 import com.wisprfox.android.delivery.WisprFoxAccessibilityService
-import com.wisprfox.android.overlay.avatarFor
+import com.wisprfox.android.overlay.AvatarView
 import com.wisprfox.android.provider.DictationMode
 import com.wisprfox.android.settings.AppSettings
+import com.wisprfox.android.settings.Avatar
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -79,15 +83,37 @@ fun HomeScreen(onOpenHistory: () -> Unit, onOpenSettings: () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             // Tappable hero avatar — tap to start/stop in the default mode.
-            Image(
-                painter = painterResource(avatarFor(state.pipeline)),
-                contentDescription = "Tap to dictate",
+            Box(
                 modifier = Modifier
                     .size(150.dp)
                     .clickable { container.controller.toggle(settings.defaultMode) },
-            )
+                contentAlignment = Alignment.Center,
+            ) {
+                AvatarView(settings.avatar, state.pipeline, Modifier.size(140.dp))
+            }
             Text(statusLine(state), style = MaterialTheme.typography.titleMedium)
             state.message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+
+            Spacer(Modifier.height(4.dp))
+            Text("Avatar", style = MaterialTheme.typography.labelLarge)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = settings.avatar == Avatar.FOX,
+                    onClick = { scope.launch { container.settingsStore.setAvatar(Avatar.FOX) } },
+                    label = { Text("Fox") },
+                )
+                FilterChip(
+                    selected = settings.avatar == Avatar.CLIPPY,
+                    onClick = { scope.launch { container.settingsStore.setAvatar(Avatar.CLIPPY) } },
+                    label = { Text("Clippy") },
+                )
+                FilterChip(
+                    selected = false,
+                    enabled = false,
+                    onClick = {},
+                    label = { Text("MS Clippy · soon") },
+                )
+            }
 
             Spacer(Modifier.height(4.dp))
             Text("Default mode", style = MaterialTheme.typography.labelLarge)
@@ -133,34 +159,46 @@ private fun SetupButtons(ctx: Context) {
     val pm = ctx.getSystemService(Context.POWER_SERVICE) as? PowerManager
     val batteryOk = pm?.isIgnoringBatteryOptimizations(ctx.packageName) == true
 
-    // Always navigate to the relevant settings page (these are no-ops to grant
-    // again, but opening the page lets the user verify/toggle — the previous
-    // "do nothing when already granted" felt like a broken button).
-    OutlinedButton(
-        onClick = {
+    // Three compact tiles side by side. Tapping always opens the relevant page
+    // (so it never feels like a dead button), and the tick shows current state.
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        SetupTile(Modifier.weight(1f), "Overlay", "Floating fox", overlayOk) {
             ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")))
-        },
-        modifier = Modifier.fillMaxWidth(),
-    ) { Text(if (overlayOk) "Floating avatar: allowed ✓" else "Allow floating avatar (overlay)") }
-
-    OutlinedButton(
-        onClick = { ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
-        modifier = Modifier.fillMaxWidth(),
-    ) { Text(if (a11yOk) "Auto-paste: on ✓" else "Enable auto-paste (Accessibility)") }
-
-    OutlinedButton(
-        onClick = {
-            // Use the full list screen so something always opens, even when
-            // already exempted (the per-package request dialog is a no-op then).
+        }
+        SetupTile(Modifier.weight(1f), "Auto-paste", "Into the box", a11yOk) {
+            ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        }
+        SetupTile(Modifier.weight(1f), "Battery", "Stay alive", batteryOk) {
             val intent = if (batteryOk) {
                 Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
             } else {
                 Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}"))
             }
             ctx.startActivity(intent)
-        },
-        modifier = Modifier.fillMaxWidth(),
-    ) { Text(if (batteryOk) "Battery exemption: on ✓" else "Keep alive (battery exemption)") }
+        }
+    }
+}
+
+@Composable
+private fun SetupTile(
+    modifier: Modifier,
+    title: String,
+    subtitle: String,
+    ok: Boolean,
+    onClick: () -> Unit,
+) {
+    Card(modifier.clickable { onClick() }) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                if (ok) {
+                    Spacer(Modifier.width(3.dp))
+                    Icon(Icons.Filled.Check, null, tint = Color(0xFF2FB170), modifier = Modifier.size(13.dp))
+                }
+            }
+            Text(subtitle, style = MaterialTheme.typography.bodySmall)
+        }
+    }
 }
 
 private fun statusLine(s: AppState.Snapshot): String = when (s.pipeline) {

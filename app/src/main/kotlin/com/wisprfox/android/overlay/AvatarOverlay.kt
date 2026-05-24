@@ -22,9 +22,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -50,6 +54,7 @@ import androidx.compose.ui.unit.sp
 import com.wisprfox.android.core.AppState
 import com.wisprfox.android.core.PipelineState
 import com.wisprfox.android.provider.DictationMode
+import com.wisprfox.android.settings.Avatar
 import kotlinx.coroutines.delay
 
 private val FOX_SIZE = 70.dp     // ~15% bigger than the previous 58/54.
@@ -65,6 +70,7 @@ private val MENU_WIDTH = 92.dp   // pills sized so the column width ≈ Foxy →
 @Composable
 fun AvatarOverlay(
     snapshot: AppState.Snapshot,
+    avatar: Avatar,
     onTap: () -> Unit,
     onPickMode: (DictationMode) -> Unit,
     onDrag: (dx: Float, dy: Float) -> Unit,
@@ -141,8 +147,11 @@ fun AvatarOverlay(
                             fontSize = 11.sp,
                             color = if (snapshot.messageIsError) Color.White else MaterialTheme.colorScheme.onSurface,
                         )
-                        if (isRec) {
-                            VoiceBars()
+                        when (snapshot.pipeline) {
+                            PipelineState.RECORDING -> VoiceBars()
+                            PipelineState.TRANSCRIBING, PipelineState.CLEANING, PipelineState.INJECTING -> ThinkingDots()
+                            PipelineState.DONE -> if (snapshot.message != null) DoneTick()
+                            else -> {}
                         }
                     }
                 }
@@ -171,11 +180,7 @@ fun AvatarOverlay(
                 },
             contentAlignment = Alignment.Center,
         ) {
-            Image(
-                painter = painterResource(avatarFor(snapshot.pipeline)),
-                contentDescription = "wispr-fox",
-                modifier = Modifier.size(FOX_IMG),
-            )
+            AvatarView(avatar = avatar, state = snapshot.pipeline, modifier = Modifier.size(FOX_IMG))
         }
     }
 }
@@ -226,4 +231,37 @@ private fun VoiceBars() {
             )
         }
     }
+}
+
+/** Animated "…" for the transcribing / polishing / delivering stages. */
+@Composable
+private fun ThinkingDots() {
+    val t = rememberInfiniteTransition(label = "dots")
+    val color = MaterialTheme.colorScheme.onSurface
+    Row(
+        modifier = Modifier.padding(start = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        repeat(3) { i ->
+            val a by t.animateFloat(
+                initialValue = 0.25f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(tween(500, delayMillis = i * 130), RepeatMode.Reverse),
+                label = "dot$i",
+            )
+            Box(Modifier.size(4.dp).clip(CircleShape).background(color.copy(alpha = a)))
+        }
+    }
+}
+
+/** Little green check shown with the "Pasted / Copied" bubble. */
+@Composable
+private fun DoneTick() {
+    Icon(
+        Icons.Filled.Check,
+        contentDescription = null,
+        tint = Color(0xFF2FB170),
+        modifier = Modifier.padding(start = 6.dp).size(14.dp),
+    )
 }
