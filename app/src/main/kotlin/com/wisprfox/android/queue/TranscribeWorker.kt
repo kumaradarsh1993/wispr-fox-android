@@ -19,6 +19,7 @@ import com.wisprfox.android.history.RecordingStatus
 import com.wisprfox.android.provider.CleanupOrchestrator
 import com.wisprfox.android.provider.DictationMode
 import com.wisprfox.android.provider.SttError
+import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
 /**
@@ -103,7 +104,20 @@ class TranscribeWorker(
                 activeRecordingId = null,
             )
         }
+        scheduleIdleReset()
         return Result.success()
+    }
+
+    /** After a brief success/error dwell, return the avatar to idle (so it
+     *  reverts to its sitting art and can hide again with the keyboard). */
+    private fun scheduleIdleReset() {
+        container.applicationScope.launch {
+            kotlinx.coroutines.delay(1800)
+            val p = AppState.state.value.pipeline
+            if (p == PipelineState.DONE || p == PipelineState.ERROR) {
+                AppState.update { copy(pipeline = PipelineState.IDLE, message = null) }
+            }
+        }
     }
 
     private suspend fun retryOrFail(id: String, message: String): Result {
@@ -120,6 +134,7 @@ class TranscribeWorker(
         AppState.update {
             copy(pipeline = PipelineState.ERROR, message = message, messageIsError = true, activeRecordingId = null)
         }
+        scheduleIdleReset()
         return Result.failure()
     }
 

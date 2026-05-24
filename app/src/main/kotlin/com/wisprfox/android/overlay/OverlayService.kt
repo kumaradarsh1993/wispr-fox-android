@@ -6,6 +6,7 @@ import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.IBinder
 import android.view.Gravity
+import android.view.View
 import android.view.WindowManager
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -23,6 +24,15 @@ import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.wisprfox.android.WisprFoxApp
 import com.wisprfox.android.core.AppState
+import com.wisprfox.android.core.PipelineState
+import com.wisprfox.android.delivery.WisprFoxAccessibilityService
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 /**
  * Hosts the always-on floating fox avatar in a system overlay window
@@ -41,6 +51,7 @@ class OverlayService : Service() {
     private var owner: OverlayViewOwner? = null
     private lateinit var params: WindowManager.LayoutParams
     private lateinit var prefs: android.content.SharedPreferences
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -49,6 +60,32 @@ class OverlayService : Service() {
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         prefs = getSharedPreferences("overlay", Context.MODE_PRIVATE)
         addOverlay()
+        observeVisibility()
+    }
+
+    /**
+     * The fox is NOT permanently on screen. It appears when the keyboard is up
+     * (an editable field is focused) and hides when the keyboard is dismissed —
+     * but always stays visible while a recording/transcription is in flight so
+     * you can scroll or move it mid-dictation. When the AccessibilityService is
+     * off we can't detect the keyboard, so we fall back to always-visible.
+     */
+    private fun observeVisibility() {
+        serviceScope.launch {
+            AppState.state
+                .map { snap ->
+                    val busy = snap.pipeline == PipelineState.RECORDING ||
+                        snap.pipeline == PipelineState.TRANSCRIBING ||
+                        snap.pipeline == PipelineState.CLEANING ||
+                        snap.pipeline == PipelineState.INJECTING
+                    val a11yOn = WisprFoxAccessibilityService.isConnected()
+                    busy || (if (a11yOn) snap.keyboardVisible else true)
+                }
+                .distinctUntilChanged()
+                .collect { show ->
+                    composeView?.visibility = if (show) View.VISIBLE else View.GONE
+                }
+        }
     }
 
     private fun addOverlay() {
@@ -98,6 +135,13 @@ class OverlayService : Service() {
             }
         }
 
+        // Start hidden when accessibility can drive visibility and the keyboard
+        // isn't up — the collector flips it on as soon as a field is focused.
+        view.visibility = if (WisprFoxAccessibilityService.isConnected() &&
+            AppState.state.value.pipeline == PipelineState.IDLE &&
+            !AppState.state.value.keyboardVisible
+        ) View.GONE else View.VISIBLE
+
         viewOwner.onCreate()
         composeView = view
         windowManager.addView(view, params)
@@ -105,6 +149,7 @@ class OverlayService : Service() {
     }
 
     override fun onDestroy() {
+        serviceScope.cancel()
         owner?.onDestroy()
         composeView?.let { runCatching { windowManager.removeView(it) } }
         composeView = null

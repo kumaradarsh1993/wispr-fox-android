@@ -32,6 +32,13 @@ object AppState {
         /** Transient bubble/toast text (e.g. "Copied to clipboard"). null = none. */
         val message: String? = null,
         val messageIsError: Boolean = false,
+        /**
+         * True when the soft keyboard / an editable field is in focus, as
+         * reported by the AccessibilityService. Drives the avatar's
+         * appear-with-keyboard / hide-on-dismiss behaviour. (When accessibility
+         * is OFF we can't detect this, so the overlay falls back to always-on.)
+         */
+        val keyboardVisible: Boolean = false,
     )
 
     private val _state = MutableStateFlow(Snapshot())
@@ -45,6 +52,8 @@ object AppState {
 
     fun setMetrics(elapsedMs: Long, totalBytes: Long) =
         update { copy(elapsedMs = elapsedMs, totalBytes = totalBytes) }
+
+    fun setKeyboardVisible(visible: Boolean) = update { copy(keyboardVisible = visible) }
 
     fun toast(text: String, isError: Boolean = false) =
         update { copy(message = text, messageIsError = isError) }

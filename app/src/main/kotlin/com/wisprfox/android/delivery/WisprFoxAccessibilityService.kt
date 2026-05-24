@@ -4,6 +4,8 @@ import android.accessibilityservice.AccessibilityService
 import android.os.Bundle
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
+import com.wisprfox.android.core.AppState
 
 /**
  * Opt-in (default-on, since we sideload) auto-paste. When connected, it can
@@ -33,9 +35,23 @@ class WisprFoxAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
-    // We don't react to events — only to explicit pipeline calls.
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    /**
+     * We never act autonomously on content. The only thing we observe is
+     * whether the soft keyboard is currently on screen, so the floating avatar
+     * can appear with the keyboard and vanish when it's dismissed. We detect
+     * the keyboard by looking for an input-method window in the window list
+     * (requires flagRetrieveInteractiveWindows, set in the service config).
+     */
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        AppState.setKeyboardVisible(isKeyboardVisible())
+    }
+
     override fun onInterrupt() {}
+
+    private fun isKeyboardVisible(): Boolean =
+        runCatching {
+            windows?.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD } == true
+        }.getOrDefault(false)
 
     private fun focusedEditable(): AccessibilityNodeInfo? {
         val root = rootInActiveWindow ?: return null
