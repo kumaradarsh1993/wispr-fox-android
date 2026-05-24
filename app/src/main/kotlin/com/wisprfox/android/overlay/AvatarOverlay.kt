@@ -121,7 +121,7 @@ fun AvatarOverlay(
         // The fox.
         Box(
             modifier = Modifier
-                .size(96.dp)
+                .size(58.dp)
                 .scale(breathe)
                 .pointerInput(Unit) {
                     detectTapGestures(
@@ -148,7 +148,7 @@ fun AvatarOverlay(
             Image(
                 painter = painterResource(avatarFor(snapshot.pipeline)),
                 contentDescription = "wispr-fox",
-                modifier = Modifier.size(88.dp),
+                modifier = Modifier.size(54.dp),
             )
         }
     }

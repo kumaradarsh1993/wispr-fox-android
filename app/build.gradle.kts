@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -5,6 +7,15 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
 }
+
+// Dev convenience: read API keys from a gitignored keys.properties at the repo
+// root so iterative debug installs auto-seed them (no re-pasting). Empty when
+// the file is absent.
+val devKeys = Properties().apply {
+    val f = rootProject.file("keys.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+fun devKey(name: String): String = (devKeys.getProperty(name) ?: "").trim().replace("\"", "")
 
 android {
     namespace = "com.wisprfox.android"
@@ -33,11 +44,16 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // No baked keys in release builds.
+            buildConfigField("String", "DEV_GROQ_KEY", "\"\"")
+            buildConfigField("String", "DEV_GEMINI_KEY", "\"\"")
         }
         debug {
             isMinifyEnabled = false
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            buildConfigField("String", "DEV_GROQ_KEY", "\"${devKey("groq")}\"")
+            buildConfigField("String", "DEV_GEMINI_KEY", "\"${devKey("gemini")}\"")
         }
     }
 
@@ -52,6 +68,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     sourceSets["main"].kotlin.srcDirs("src/main/kotlin")

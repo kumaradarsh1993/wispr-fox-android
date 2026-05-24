@@ -3,6 +3,7 @@ package com.wisprfox.android
 import android.app.Application
 import android.content.Context
 import com.wisprfox.android.core.AppContainer
+import com.wisprfox.android.settings.SecureKeyStore
 import kotlinx.coroutines.launch
 
 /**
@@ -19,8 +20,25 @@ class WisprFoxApp : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        seedDevKeysIfNeeded()
         container.applicationScope.launch {
             runCatching { container.recordings.recoverStranded() }
+        }
+    }
+
+    /**
+     * Debug convenience: if a dev key was provided via keys.properties (baked
+     * into BuildConfig) and no key is stored yet, seed it. Lets iterative debug
+     * installs skip onboarding without re-pasting. Release builds carry empty
+     * BuildConfig keys, so this is a no-op there.
+     */
+    private fun seedDevKeysIfNeeded() {
+        val secrets = container.secrets
+        if (!secrets.has(SecureKeyStore.Key.GroqStt) && BuildConfig.DEV_GROQ_KEY.isNotBlank()) {
+            secrets.put(SecureKeyStore.Key.GroqStt, BuildConfig.DEV_GROQ_KEY)
+        }
+        if (!secrets.has(SecureKeyStore.Key.GeminiLlm) && BuildConfig.DEV_GEMINI_KEY.isNotBlank()) {
+            secrets.put(SecureKeyStore.Key.GeminiLlm, BuildConfig.DEV_GEMINI_KEY)
         }
     }
 

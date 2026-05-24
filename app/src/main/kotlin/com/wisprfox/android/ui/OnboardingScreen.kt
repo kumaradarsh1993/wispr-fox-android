@@ -43,7 +43,7 @@ import com.wisprfox.android.settings.SecureKeyStore
 fun OnboardingScreen(onDone: () -> Unit) {
     val ctx = LocalContext.current
     val container = remember { WisprFoxApp.container(ctx) }
-    var keySaved by remember { mutableStateOf(container.secrets.has(SecureKeyStore.Key.GroqStt)) }
+    var groqSaved by remember { mutableStateOf(container.secrets.has(SecureKeyStore.Key.GroqStt)) }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
@@ -59,8 +59,12 @@ fun OnboardingScreen(onDone: () -> Unit) {
 
         HorizontalDivider()
         Text("1. Add your Groq API key", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Text("Free at console.groq.com. Used for Whisper transcription (and Llama cleanup unless you pick Gemini in Settings).", style = MaterialTheme.typography.bodySmall)
-        KeyField("Groq API key", SecureKeyStore.Key.GroqStt, container.secrets)
+        Text("Free at console.groq.com. Used for Whisper transcription (and Llama cleanup unless you pick Gemini).", style = MaterialTheme.typography.bodySmall)
+        KeyField("Groq API key", SecureKeyStore.Key.GroqStt, container.secrets) { groqSaved = it }
+
+        Text("Gemini API key (optional)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+        Text("Only needed if you switch the cleanup provider to Gemini in Settings.", style = MaterialTheme.typography.bodySmall)
+        KeyField("Gemini API key", SecureKeyStore.Key.GeminiLlm, container.secrets)
 
         HorizontalDivider()
         Text("2. Grant access", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -87,9 +91,8 @@ fun OnboardingScreen(onDone: () -> Unit) {
         ) { Text("Keep wispr-fox alive (battery exemption)") }
 
         HorizontalDivider()
-        keySaved = container.secrets.has(SecureKeyStore.Key.GroqStt)
-        Button(onClick = onDone, enabled = keySaved, modifier = Modifier.fillMaxWidth()) {
-            Text(if (keySaved) "Start dictating" else "Add your Groq key to continue")
+        Button(onClick = onDone, enabled = groqSaved, modifier = Modifier.fillMaxWidth()) {
+            Text(if (groqSaved) "Start dictating" else "Add your Groq key to continue")
         }
     }
 }

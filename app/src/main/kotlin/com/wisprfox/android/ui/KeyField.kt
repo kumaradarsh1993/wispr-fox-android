@@ -19,9 +19,18 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.wisprfox.android.settings.SecureKeyStore
 
-/** Reusable masked API-key entry (Settings + Onboarding). Writes to the Keystore. */
+/**
+ * Reusable masked API-key entry (Settings + Onboarding). Writes to the Keystore.
+ * [onChange] fires with the new key-presence (true after Save, false after Clear)
+ * so parents like Onboarding can recompose their "continue" gate.
+ */
 @Composable
-fun KeyField(label: String, key: SecureKeyStore.Key, secrets: SecureKeyStore) {
+fun KeyField(
+    label: String,
+    key: SecureKeyStore.Key,
+    secrets: SecureKeyStore,
+    onChange: (hasKey: Boolean) -> Unit = {},
+) {
     var value by remember { mutableStateOf("") }
     var saved by remember { mutableStateOf(secrets.has(key)) }
     var status by remember { mutableStateOf<String?>(null) }
@@ -43,10 +52,13 @@ fun KeyField(label: String, key: SecureKeyStore.Key, secrets: SecureKeyStore) {
                     saved = true
                     value = ""
                     status = "Saved"
+                    onChange(true)
                 },
             ) { Text("Save") }
             if (saved) {
-                OutlinedButton(onClick = { secrets.clear(key); saved = false; status = "Cleared" }) { Text("Clear") }
+                OutlinedButton(onClick = {
+                    secrets.clear(key); saved = false; status = "Cleared"; onChange(false)
+                }) { Text("Clear") }
             }
         }
         status?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
