@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App theme + Android 12 splash. Cream background with the fox icon so the
+         cold-start splash is intentional and on-brand (was the default jagged
+         icon-on-white). The Compose UI sets its own colors after launch. -->
+    <style name="Theme.WisprFox" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowSplashScreenBackground">@color/ic_launcher_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/ic_launcher_background</item>
+    </style>
+</resources>

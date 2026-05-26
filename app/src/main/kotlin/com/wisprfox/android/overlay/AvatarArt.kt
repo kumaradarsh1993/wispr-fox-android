@@ -34,12 +34,14 @@ fun bubbleLabel(state: PipelineState): String? = when (state) {
     else -> null
 }
 
-/** Desktop-style cheeky commentary while listening, keyed on seconds elapsed. */
+/** Desktop-style cheeky commentary while listening, keyed on seconds elapsed.
+ *  Thresholds kept generous — the owner dictates long, so the jokes don't fire
+ *  until you've genuinely been going a while. */
 fun listeningLabel(seconds: Int): String = when {
-    seconds < 12 -> "listening…"
-    seconds < 25 -> "still listening…"
-    seconds < 45 -> "wow, lots to say"
-    seconds < 70 -> "how long is this?"
-    seconds < 110 -> "okay, still here…"
-    else -> "marathon mode"
+    seconds < 35 -> "listening…"
+    seconds < 75 -> "still with you…"
+    seconds < 130 -> "wow, lots to say"
+    seconds < 210 -> "how long is this going to go?"
+    seconds < 300 -> "okay, I'll keep waiting…"
+    else -> "marathon mode 🏃"
 }

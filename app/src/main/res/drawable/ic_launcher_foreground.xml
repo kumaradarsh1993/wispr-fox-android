@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Inset the fox face into the adaptive-icon safe zone so the mask doesn't crop it. -->
+<!-- Higher-res square fox logo, inset into the adaptive-icon safe zone so the
+     mask doesn't crop it and there's no hard edge. -->
 <inset xmlns:android="http://schemas.android.com/apk/res/android"
-    android:drawable="@drawable/fox_favicon"
-    android:inset="20%" />
+    android:drawable="@drawable/fox_logo"
+    android:inset="16%" />
