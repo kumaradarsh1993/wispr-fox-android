@@ -49,7 +49,7 @@ import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(onBack: () -> Unit, onReplayOnboarding: () -> Unit = {}) {
     val ctx = LocalContext.current
     val container = remember { WisprFoxApp.container(ctx) }
     val scope = rememberCoroutineScope()
@@ -145,6 +145,9 @@ fun SettingsScreen(onBack: () -> Unit) {
             HorizontalDivider()
             SectionTitle("About")
             Text("wispr-fox for Android — bring-your-own-key dictation. Whisper + Groq/Gemini. Your audio and keys stay on this device.", style = MaterialTheme.typography.bodySmall)
+            OutlinedButton(onClick = onReplayOnboarding, modifier = Modifier.fillMaxWidth()) {
+                Text("Replay setup guide")
+            }
         }
     }
 }

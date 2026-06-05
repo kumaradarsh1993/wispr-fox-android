@@ -49,7 +49,12 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         composable("history") { HistoryScreen(onBack = { nav.popBackStack() }) }
-                        composable("settings") { SettingsScreen(onBack = { nav.popBackStack() }) }
+                        composable("settings") {
+                            SettingsScreen(
+                                onBack = { nav.popBackStack() },
+                                onReplayOnboarding = { nav.navigate("onboarding") },
+                            )
+                        }
                     }
                 }
             }
