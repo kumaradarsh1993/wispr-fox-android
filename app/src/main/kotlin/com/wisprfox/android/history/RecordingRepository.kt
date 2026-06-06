@@ -1,6 +1,8 @@
 package com.wisprfox.android.history
 
+import android.content.Context
 import com.wisprfox.android.provider.DictationMode
+import com.wisprfox.android.queue.TranscribeWorker
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import java.io.File
@@ -98,6 +100,43 @@ class RecordingRepository(private val dao: RecordingDao) {
     suspend fun delete(id: String) {
         dao.getById(id)?.let { runCatching { File(it.audioPath).delete() } }
         dao.delete(id)
+    }
+
+    /**
+     * Idempotent retry, matching the desktop sibling's `retry_recording`:
+     * bump retry_count, clear stale error, flip status back to TRANSCRIBING
+     * so the row reads as "in flight" again, then enqueue the worker. Safe
+     * to call regardless of current status (covers stranded rows the
+     * recoverStranded sweep already moved into ERROR plus the rarer case
+     * where a worker is genuinely still running — Worker queue is unique
+     * per recording id, so the duplicate is dropped).
+     */
+    suspend fun retry(context: Context, id: String) {
+        dao.bumpRetry(id)
+        dao.clearError(id)
+        dao.setStatus(id, RecordingStatus.TRANSCRIBING.raw)
+        TranscribeWorker.enqueue(context, id)
+    }
+
+    /**
+     * Bulk-delete the given rows AND their WAV files on disk. The user's
+     * mental model is "delete = it's gone everywhere"; if we left the WAVs
+     * behind, storage would silently bloat past the retention cap.
+     */
+    suspend fun deleteMany(ids: List<String>) {
+        if (ids.isEmpty()) return
+        for (row in dao.getPathsForIds(ids)) {
+            runCatching { File(row.audioPath).delete() }
+        }
+        dao.deleteIds(ids)
+    }
+
+    /** Clear everything — DB rows AND the WAV files behind them. */
+    suspend fun deleteAll() {
+        for (row in dao.listAll()) {
+            runCatching { File(row.audioPath).delete() }
+        }
+        dao.deleteAll()
     }
 
     suspend fun recoverStranded(): Int = dao.recoverStranded()

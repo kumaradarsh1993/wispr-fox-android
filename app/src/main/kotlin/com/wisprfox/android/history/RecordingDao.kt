@@ -48,8 +48,25 @@ interface RecordingDao {
     @Query("UPDATE recordings SET retry_count = retry_count + 1 WHERE id = :id")
     suspend fun bumpRetry(id: String)
 
+    @Query("UPDATE recordings SET error = NULL WHERE id = :id")
+    suspend fun clearError(id: String)
+
     @Query("DELETE FROM recordings WHERE id = :id")
     suspend fun delete(id: String)
+
+    /** All audio paths — for bulk-delete to wipe the WAVs from disk first. */
+    @Query("SELECT id, audio_path, created_at FROM recordings")
+    suspend fun listAll(): List<PurgeRow>
+
+    /** Bulk-delete by id (rows only; caller is responsible for the WAVs). */
+    @Query("DELETE FROM recordings WHERE id IN (:ids)")
+    suspend fun deleteIds(ids: List<String>)
+
+    @Query("DELETE FROM recordings")
+    suspend fun deleteAll()
+
+    @Query("SELECT id, audio_path, created_at FROM recordings WHERE id IN (:ids)")
+    suspend fun getPathsForIds(ids: List<String>): List<PurgeRow>
 
     @Query("SELECT id, audio_path, created_at FROM recordings WHERE created_at < :olderThan")
     suspend fun listPurgeable(olderThan: Long): List<PurgeRow>

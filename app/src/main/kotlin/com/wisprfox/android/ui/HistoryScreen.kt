@@ -1,22 +1,39 @@
 package com.wisprfox.android.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckBox
+import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -26,59 +43,123 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.clickable
 import com.wisprfox.android.WisprFoxApp
 import com.wisprfox.android.core.AltVersionGenerator
 import com.wisprfox.android.history.AltKind
 import com.wisprfox.android.history.Recording
 import com.wisprfox.android.history.RecordingStatus
 import com.wisprfox.android.provider.DictationMode
-import com.wisprfox.android.queue.TranscribeWorker
-import kotlinx.coroutines.launch
-import androidx.compose.runtime.rememberCoroutineScope
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.launch
 
+/**
+ * History/Library, with the v1.1 additions:
+ *
+ *  - **Retry chip is always visible**, matching the desktop sibling
+ *    (`HistoryRow.svelte` retry comment): stranded rows can be stuck in
+ *    transcribing/cleaning, and retry is the recovery path. Confirm
+ *    dialog on non-error rows so a stray tap doesn't burn an STT call.
+ *    Retry count appears next to the meta line (↻ N).
+ *  - **Select mode** in the top bar — multi-select rows and bulk delete.
+ *    Overflow menu → "Delete all". Every destructive path goes through
+ *    a confirm dialog and removes the WAV from disk via the repository.
+ *  - **Bottom NavigationBar** (Home/History) — replaces the buried
+ *    history card on home.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HistoryScreen(onBack: () -> Unit) {
+fun HistoryScreen(onBack: () -> Unit, onOpenHome: () -> Unit) {
     val ctx = LocalContext.current
     val container = remember { WisprFoxApp.container(ctx) }
+    val scope = rememberCoroutineScope()
     val recordings by container.recordings.observeRecent().collectAsState(initial = emptyList())
     val player = rememberAudioPlayer()
+
+    var selectMode by remember { mutableStateOf(false) }
+    val selected = remember { mutableStateMapOf<String, Boolean>() }
+    var menuOpen by remember { mutableStateOf(false) }
+    var confirmDeleteAll by remember { mutableStateOf(false) }
+    var confirmDeleteSelected by remember { mutableStateOf(false) }
+
+    fun exitSelectMode() {
+        selectMode = false
+        selected.clear()
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("History") },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+                title = {
+                    Text(
+                        if (selectMode) "${selected.count { it.value }} selected" else "History",
+                    )
+                },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    IconButton(onClick = { if (selectMode) exitSelectMode() else onBack() }) {
+                        Icon(
+                            if (selectMode) Icons.Filled.Close else Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = if (selectMode) "Cancel" else "Back",
+                        )
+                    }
+                },
+                actions = {
+                    if (selectMode) {
+                        val anyChecked = selected.any { it.value }
+                        IconButton(onClick = { confirmDeleteSelected = anyChecked }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Delete selected", tint = if (anyChecked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    } else {
+                        IconButton(
+                            onClick = { selectMode = true },
+                            enabled = recordings.isNotEmpty(),
+                        ) { Icon(Icons.Filled.CheckBoxOutlineBlank, contentDescription = "Select") }
+                        Box {
+                            IconButton(onClick = { menuOpen = true }) {
+                                Icon(Icons.Filled.MoreVert, contentDescription = "More")
+                            }
+                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                DropdownMenuItem(
+                                    text = { Text("Delete all", color = MaterialTheme.colorScheme.error) },
+                                    enabled = recordings.isNotEmpty(),
+                                    leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                                    onClick = { menuOpen = false; confirmDeleteAll = true },
+                                )
+                            }
+                        }
                     }
                 },
             )
         },
+        bottomBar = { WisprBottomBar(NavTab.HISTORY, onSelect = { if (it == NavTab.HOME) onOpenHome() }) },
     ) { inner ->
         if (recordings.isEmpty()) {
             Column(
                 Modifier.fillMaxSize().padding(inner).padding(24.dp),
                 verticalArrangement = Arrangement.Center,
             ) {
-                Text("Nothing yet", style = MaterialTheme.typography.titleMedium)
+                Text("Nothing yet", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "Recordings you make will appear here — replay the audio, and view the raw, cleaned, and reformatted text.",
+                    "Recordings you make will appear here — replay the audio, retry, and view Raw / Clean / Draft versions.",
                     style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         } else {
@@ -88,15 +169,56 @@ fun HistoryScreen(onBack: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 items(recordings, key = { it.id }) { rec ->
-                    HistoryRow(rec, player)
+                    HistoryRow(
+                        rec = rec,
+                        player = player,
+                        selectMode = selectMode,
+                        checked = selected[rec.id] == true,
+                        onToggleSelect = { selected[rec.id] = !(selected[rec.id] ?: false) },
+                    )
                 }
             }
         }
     }
+
+    if (confirmDeleteAll) {
+        ConfirmDialog(
+            title = "Delete everything?",
+            body = "This removes every recording — transcripts and the WAV audio on this phone. There's no undo.",
+            confirm = "Delete all",
+            onDismiss = { confirmDeleteAll = false },
+            onConfirm = {
+                confirmDeleteAll = false
+                scope.launch { container.recordings.deleteAll() }
+                exitSelectMode()
+            },
+        )
+    }
+
+    if (confirmDeleteSelected) {
+        val ids = selected.filter { it.value }.keys.toList()
+        ConfirmDialog(
+            title = "Delete ${ids.size} recording${if (ids.size == 1) "" else "s"}?",
+            body = "The transcripts and the WAV audio for the selected recordings will be removed from this phone.",
+            confirm = "Delete",
+            onDismiss = { confirmDeleteSelected = false },
+            onConfirm = {
+                confirmDeleteSelected = false
+                scope.launch { container.recordings.deleteMany(ids) }
+                exitSelectMode()
+            },
+        )
+    }
 }
 
 @Composable
-private fun HistoryRow(rec: Recording, player: AudioPlayerState) {
+private fun HistoryRow(
+    rec: Recording,
+    player: AudioPlayerState,
+    selectMode: Boolean,
+    checked: Boolean,
+    onToggleSelect: () -> Unit,
+) {
     val ctx = LocalContext.current
     val container = remember { WisprFoxApp.container(ctx) }
     val scope = rememberCoroutineScope()
@@ -104,35 +226,74 @@ private fun HistoryRow(rec: Recording, player: AudioPlayerState) {
     var expanded by remember(rec.id) { mutableStateOf(false) }
     var tab by remember(rec.id) { mutableStateOf(defaultTabFor(rec.mode)) }
     var generating by remember(rec.id) { mutableStateOf(false) }
+    var confirmRetry by remember(rec.id) { mutableStateOf(false) }
+    var confirmDelete by remember(rec.id) { mutableStateOf(false) }
 
-    Card(Modifier.fillMaxWidth()) {
+    val isError = rec.status == RecordingStatus.ERROR
+    val rowBg = if (isError) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.18f)
+        else MaterialTheme.colorScheme.surface
+
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = rowBg)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(
-                Modifier.fillMaxWidth().clickable { expanded = !expanded },
+                Modifier.fillMaxWidth().clickable {
+                    if (selectMode) onToggleSelect() else expanded = !expanded
+                },
+                verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Column {
-                    Text(timeFmt.format(Date(rec.createdAt)), fontWeight = FontWeight.SemiBold)
-                    Text(
-                        "${rec.mode.label} · ${rec.durationMs / 1000}s · ${rec.status.name.lowercase()}",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                val playing = player.playingPath == rec.audioPath
-                IconButton(onClick = { player.toggle(rec.audioPath) }) {
+                if (selectMode) {
                     Icon(
-                        if (playing) Icons.Filled.Stop else Icons.Filled.PlayArrow,
-                        contentDescription = if (playing) "Stop" else "Play",
+                        if (checked) Icons.Filled.CheckBox else Icons.Filled.CheckBoxOutlineBlank,
+                        contentDescription = null,
+                        tint = if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(22.dp),
                     )
+                    Spacer(Modifier.size(10.dp))
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(timeFmt.format(Date(rec.createdAt)), fontWeight = FontWeight.SemiBold)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            "${rec.mode.label} · ${rec.durationMs / 1000}s · ${statusLabel(rec.status)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (rec.retryCount > 0) {
+                            Box(
+                                Modifier
+                                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 6.dp, vertical = 1.dp),
+                            ) {
+                                Text(
+                                    "↻ ${rec.retryCount}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+                if (!selectMode) {
+                    val playing = player.playingPath == rec.audioPath
+                    IconButton(onClick = { player.toggle(rec.audioPath) }) {
+                        Icon(
+                            if (playing) Icons.Filled.Stop else Icons.Filled.PlayArrow,
+                            contentDescription = if (playing) "Stop" else "Play",
+                        )
+                    }
                 }
             }
 
-            // Collapsed preview.
-            if (!expanded) {
+            // Collapsed preview text.
+            if (!expanded && !selectMode) {
                 rec.primaryText()?.takeIf { it.isNotBlank() }?.let {
                     Text(it.take(140), style = MaterialTheme.typography.bodyMedium, maxLines = 2)
                 }
-            } else {
+                rec.error?.takeIf { isError }?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, maxLines = 2)
+                }
+            } else if (!selectMode) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     TabChip("Raw", tab == Tab.RAW) { tab = Tab.RAW }
                     TabChip("Clean", tab == Tab.CLEANED) { tab = Tab.CLEANED }
@@ -154,7 +315,7 @@ private fun HistoryRow(rec: Recording, player: AudioPlayerState) {
                         }
                     }
                 } else if (tab == Tab.RAW) {
-                    Text("No transcript yet.", style = MaterialTheme.typography.bodySmall)
+                    Text("No transcript yet — tap Retry to run it.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else if (rec.transcript.isNullOrBlank()) {
                     Text("Transcribe first, then a version can be generated.", style = MaterialTheme.typography.bodySmall)
                 } else {
@@ -176,20 +337,28 @@ private fun HistoryRow(rec: Recording, player: AudioPlayerState) {
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (rec.status == RecordingStatus.ERROR) {
-                        AssistChip(
-                            onClick = {
-                                scope.launch {
-                                    container.recordings.setStatus(rec.id, RecordingStatus.TRANSCRIBING)
-                                    TranscribeWorker.enqueue(ctx, rec.id)
-                                }
-                            },
-                            label = { Text("Retry") },
-                            leadingIcon = { Icon(Icons.Filled.Refresh, contentDescription = null) },
-                        )
-                    }
                     AssistChip(
-                        onClick = { scope.launch { container.recordings.delete(rec.id) } },
+                        onClick = {
+                            // Same pattern as desktop's retry(): if the row's
+                            // not an error, confirm before nuking existing
+                            // text. If it IS an error, fire immediately —
+                            // that's the whole point of retry.
+                            if (isError) {
+                                scope.launch { container.recordings.retry(ctx, rec.id) }
+                            } else {
+                                confirmRetry = true
+                            }
+                        },
+                        label = { Text(if (isError) "Retry" else "Re-run") },
+                        leadingIcon = { Icon(Icons.Filled.Refresh, contentDescription = null) },
+                        colors = if (isError) AssistChipDefaults.assistChipColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            labelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            leadingIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        ) else AssistChipDefaults.assistChipColors(),
+                    )
+                    AssistChip(
+                        onClick = { confirmDelete = true },
                         label = { Text("Delete") },
                         leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
                     )
@@ -198,6 +367,50 @@ private fun HistoryRow(rec: Recording, player: AudioPlayerState) {
             }
         }
     }
+
+    if (confirmRetry) {
+        ConfirmDialog(
+            title = "Re-run this recording?",
+            body = "Re-running will replace the current transcript (and any cleaned/drafted versions). The audio stays.",
+            confirm = "Re-run",
+            onDismiss = { confirmRetry = false },
+            onConfirm = {
+                confirmRetry = false
+                scope.launch { container.recordings.retry(ctx, rec.id) }
+            },
+        )
+    }
+    if (confirmDelete) {
+        ConfirmDialog(
+            title = "Delete this recording?",
+            body = "The transcript and the WAV audio file will be removed from this phone.",
+            confirm = "Delete",
+            onDismiss = { confirmDelete = false },
+            onConfirm = {
+                confirmDelete = false
+                scope.launch { container.recordings.delete(rec.id) }
+            },
+        )
+    }
+}
+
+@Composable
+private fun ConfirmDialog(
+    title: String,
+    body: String,
+    confirm: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { Text(body) },
+        confirmButton = {
+            Button(onClick = onConfirm) { Text(confirm) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable
@@ -211,6 +424,15 @@ private fun defaultTabFor(mode: DictationMode): Tab = when (mode) {
     DictationMode.RAW -> Tab.RAW
     DictationMode.CLEANED, DictationMode.ADVANCED -> Tab.CLEANED
     DictationMode.REFORMATTED -> Tab.REFORMATTED
+}
+
+private fun statusLabel(s: RecordingStatus): String = when (s) {
+    RecordingStatus.RECORDING -> "recording"
+    RecordingStatus.TRANSCRIBING -> "transcribing"
+    RecordingStatus.CLEANING -> "polishing"
+    RecordingStatus.INJECTING -> "delivering"
+    RecordingStatus.DONE -> "done"
+    RecordingStatus.ERROR -> "error"
 }
 
 private val timeFmt = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())

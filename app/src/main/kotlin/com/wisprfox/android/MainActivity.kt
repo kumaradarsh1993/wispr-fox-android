@@ -44,11 +44,27 @@ class MainActivity : ComponentActivity() {
                         }
                         composable("home") {
                             HomeScreen(
-                                onOpenHistory = { nav.navigate("history") },
+                                onOpenHistory = {
+                                    nav.navigate("history") {
+                                        popUpTo("home") { saveState = true }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                },
                                 onOpenSettings = { nav.navigate("settings") },
                             )
                         }
-                        composable("history") { HistoryScreen(onBack = { nav.popBackStack() }) }
+                        composable("history") {
+                            HistoryScreen(
+                                onBack = { nav.popBackStack() },
+                                onOpenHome = {
+                                    nav.navigate("home") {
+                                        popUpTo("home") { inclusive = true }
+                                        launchSingleTop = true
+                                    }
+                                },
+                            )
+                        }
                         composable("settings") {
                             SettingsScreen(
                                 onBack = { nav.popBackStack() },

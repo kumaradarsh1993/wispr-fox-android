@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -26,11 +27,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -45,10 +45,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -59,17 +62,23 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.Image
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.wisprfox.android.R
 import com.wisprfox.android.WisprFoxApp
 import com.wisprfox.android.core.AppState
 import com.wisprfox.android.core.PipelineState
 import com.wisprfox.android.delivery.WisprFoxAccessibilityService
+import com.wisprfox.android.history.Recording
 import com.wisprfox.android.overlay.AvatarView
 import com.wisprfox.android.provider.DictationMode
 import com.wisprfox.android.settings.AppSettings
 import com.wisprfox.android.settings.Avatar
 import com.wisprfox.android.settings.SecureKeyStore
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.launch
 
 private const val STT_TURBO = "whisper-large-v3-turbo"
@@ -84,7 +93,20 @@ fun HomeScreen(onOpenHistory: () -> Unit, onOpenSettings: () -> Unit) {
     val scope = rememberCoroutineScope()
     val state by AppState.state.collectAsState()
     val settings by container.settingsStore.settings.collectAsState(initial = AppSettings())
+    val recordings by container.recordings.observeRecent(limit = 3).collectAsState(initial = emptyList())
     val recording = state.pipeline == PipelineState.RECORDING
+
+    // Permission status is read live and refreshed on each ON_RESUME so the
+    // "Finish setup" banner disappears the moment the user returns from the
+    // system page that granted it.
+    var permTick by remember { mutableIntStateOf(0) }
+    val owner = LocalLifecycleOwner.current
+    DisposableEffect(owner) {
+        val obs = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_RESUME) permTick++ }
+        owner.lifecycle.addObserver(obs)
+        onDispose { owner.lifecycle.removeObserver(obs) }
+    }
+    val missing = remember(permTick) { missingPermissions(ctx) }
 
     Scaffold(
         topBar = {
@@ -110,25 +132,40 @@ fun HomeScreen(onOpenHistory: () -> Unit, onOpenSettings: () -> Unit) {
                 },
             )
         },
+        bottomBar = { WisprBottomBar(NavTab.HOME, onSelect = { if (it == NavTab.HISTORY) onOpenHistory() }) },
     ) { inner ->
         Column(
-            Modifier.fillMaxSize().padding(inner).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            Modifier
+                .fillMaxSize()
+                .padding(inner)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            StatusPill(state, recording)
-
-            Box(
-                modifier = Modifier.size(170.dp).clickable { container.controller.toggle(settings.defaultMode) },
-                contentAlignment = Alignment.Center,
-            ) {
-                AvatarView(settings.avatar, state.pipeline, Modifier.size(150.dp))
+            // Setup banner (only when something's not granted). Whole row is
+            // tappable; it deep-links to Settings where the full toggles live.
+            if (missing.isNotEmpty()) {
+                SetupBanner(missing.size) { onOpenSettings() }
             }
 
-            Text(heroTitle(state), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Text(heroSubtitle(state), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // Hero: status pill, tappable avatar, voice prompt.
+            Spacer(Modifier.height(2.dp))
+            StatusPill(state, recording)
+            Box(
+                modifier = Modifier.size(180.dp).clickable { container.controller.toggle(settings.defaultMode) },
+                contentAlignment = Alignment.Center,
+            ) {
+                AvatarView(settings.avatar, state.pipeline, Modifier.size(160.dp))
+            }
+            Text(heroTitle(state), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text(
+                heroSubtitle(state),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
 
-            // Avatar picker + mic record button.
+            // Avatar picker + big mic.
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     AvatarChip(
@@ -146,7 +183,7 @@ fun HomeScreen(onOpenHistory: () -> Unit, onOpenSettings: () -> Unit) {
                 Spacer(Modifier.weight(1f))
                 FilledIconButton(
                     onClick = { container.controller.toggle(settings.defaultMode) },
-                    modifier = Modifier.size(54.dp),
+                    modifier = Modifier.size(56.dp),
                     colors = if (recording) IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.error)
                     else IconButtonDefaults.filledIconButtonColors(),
                 ) {
@@ -186,45 +223,119 @@ fun HomeScreen(onOpenHistory: () -> Unit, onOpenSettings: () -> Unit) {
                     )
                 }
                 if (!geminiReady) {
-                    Text("Add a Gemini key in Settings to enable Gemini.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        "Add a Gemini key in Settings to enable Gemini.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
 
-            // Setup tiles.
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                val overlayOk = Settings.canDrawOverlays(ctx)
-                val a11yOk = WisprFoxAccessibilityService.isConnected()
-                val pm = ctx.getSystemService(Context.POWER_SERVICE) as? PowerManager
-                val batteryOk = pm?.isIgnoringBatteryOptimizations(ctx.packageName) == true
-                SetupTile(Modifier.weight(1f), "Overlay", "Floating fox", overlayOk) {
-                    ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")))
-                }
-                SetupTile(Modifier.weight(1f), "Auto-insert", "Into the box", a11yOk) {
-                    ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                }
-                SetupTile(Modifier.weight(1f), "Battery", "Stay alive", batteryOk) {
-                    val intent = if (batteryOk) Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-                    else Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}"))
-                    ctx.startActivity(intent)
-                }
-            }
-
-            Card(
-                Modifier.fillMaxWidth().clickable { onOpenHistory() },
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            ) {
-                Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.History, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(10.dp))
-                    Text("History", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.weight(1f))
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-            Spacer(Modifier.height(8.dp))
+            // Recents preview (kept on the main screen so it's never more than
+            // a glance away — the bottom-nav History tab opens the full list).
+            RecentsCard(recordings = recordings, onOpenAll = onOpenHistory)
+            Spacer(Modifier.height(4.dp))
         }
     }
 }
+
+/* ── Setup banner: appears only when something's missing ─────────────────── */
+
+@Composable
+private fun SetupBanner(missingCount: Int, onClick: () -> Unit) {
+    Card(
+        Modifier.fillMaxWidth().clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(Icons.Filled.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Finish setup",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+                Text(
+                    if (missingCount == 1) "One permission still needs to be granted."
+                    else "$missingCount permissions still need to be granted.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+        }
+    }
+}
+
+/* ── Recents preview ─────────────────────────────────────────────────────── */
+
+@Composable
+private fun RecentsCard(recordings: List<Recording>, onOpenAll: () -> Unit) {
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(Modifier.padding(vertical = 6.dp)) {
+            Row(
+                Modifier.fillMaxWidth().clickable(onClick = onOpenAll).padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Recent", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                Text("See all", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+            if (recordings.isEmpty()) {
+                Text(
+                    "Nothing yet — tap the fox to dictate something.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                )
+            } else {
+                recordings.forEach { r ->
+                    RecentRow(r, onClick = onOpenAll)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecentRow(rec: Recording, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                rec.primaryText()?.takeIf { it.isNotBlank() }?.let { it.take(80) }
+                    ?: "(no transcript yet)",
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+            )
+            Text(
+                "${recentTimeFmt.format(Date(rec.createdAt))} · ${rec.mode.label} · ${rec.durationMs / 1000}s",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+private val recentTimeFmt = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
+
+/* ── Reusables ───────────────────────────────────────────────────────────── */
 
 @Composable
 private fun StatusPill(state: AppState.Snapshot, recording: Boolean) {
@@ -272,20 +383,15 @@ private fun AvatarChip(
     ) { content() }
 }
 
-@Composable
-private fun SetupTile(modifier: Modifier, title: String, subtitle: String, ok: Boolean, onClick: () -> Unit) {
-    Card(modifier.clickable { onClick() }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-                if (ok) {
-                    Spacer(Modifier.width(3.dp))
-                    Icon(Icons.Filled.Check, null, tint = GREEN, modifier = Modifier.size(13.dp))
-                }
-            }
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
+/* ── Permission probe ────────────────────────────────────────────────────── */
+
+private fun missingPermissions(ctx: Context): List<String> {
+    val out = mutableListOf<String>()
+    if (!Settings.canDrawOverlays(ctx)) out += "overlay"
+    if (!WisprFoxAccessibilityService.isConnected()) out += "auto-paste"
+    val pm = ctx.getSystemService(Context.POWER_SERVICE) as? PowerManager
+    if (pm?.isIgnoringBatteryOptimizations(ctx.packageName) != true) out += "battery"
+    return out
 }
 
 private fun heroTitle(s: AppState.Snapshot): String = when (s.pipeline) {
