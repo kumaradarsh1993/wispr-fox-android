@@ -1,52 +1,60 @@
-# wispr-fox-android
+# wispr-fox for Android
 
-Android sibling to [wispr-fox](../wispr-fox/) — system-wide voice dictation
-for Indian English + Hindi, surviving long sessions and patchy networks.
+**Talk. Tap. Done.** A voice-dictation app that drops what you said straight into whatever text field you're looking at — messages, email, notes, search bars, anything.
 
-## Status
+Built for **Indian English + Hindi code-switching**, long ramble-y recordings, and patchy networks.
 
-**Pre-implementation.** This folder contains the spec; no Android code
-has been written yet.
+---
 
-## Documents
+## Download & install
 
-Read in this order:
+Grab the latest APK from the **[Releases page](https://github.com/kumaradarsh1993/wispr-fox-android/releases/latest)**.
 
-1. **[CLAUDE.md](./CLAUDE.md)** — base prompt. If you're a fresh
-   Claude Code session, start here. It tells you what to read and
-   in what order, and points at the desktop sibling for shared
-   context.
-2. [PRD.md](./PRD.md) — what we're building, what we're not, target
-   devices, tech stack, success criteria. Notes which decisions are
-   locked vs. which are leading hypotheses to validate.
-3. [DESKTOP_LINKAGE.md](./DESKTOP_LINKAGE.md) — what's shared with
-   wispr-fox desktop and what diverges.
+1. Tap the `app-debug.apk` link on your phone.
+2. Allow "Install from unknown sources" if prompted (Android will guide you).
+3. Open **wispr-fox** — the setup guide walks you through the rest.
 
-## Relationship to wispr-fox (desktop)
+> **Requires:** Android 12+ (S23 Ultra-era and newer recommended).
+> **You'll need:** a free **Groq API key** (the app deep-links you to the signup, takes ~60 seconds).
 
-| | Desktop (wispr-fox) | Android (this) |
-|---|---|---|
-| Stack | Tauri 2 + Svelte 5 + Rust | Kotlin + Compose |
-| Activation | F8/F9/F10 hotkeys | Floating overlay bubble |
-| Modes | 3 (light/advanced/drafting) | 2 (narrate/construct) |
-| Character | Clippy + skins + themes | None — utility only |
-| STT | Groq Whisper turbo | Groq Whisper turbo (same) |
-| LLM | Groq Llama / Gemini | Groq Llama / Gemini (same) |
-| Queue | Inline retry | Offline-first WorkManager queue |
+---
 
-## Why a separate repo / folder
+## What you get
 
-The platform realities are different enough that sharing code would
-create more friction than it saves. The **provider contracts** (Groq
-endpoint shapes, prompt templates) are what we copy across; the rest
-is platform-native.
+- **Floating fox bubble** — tap once to start, tap again to stop. Drag it wherever it's least in the way.
+- **Three modes** — `Raw` (verbatim transcript), `Clean` (light cleanup), or `Draft` (turns a spoken brief into a polished message). Long-press the bubble to switch.
+- **Auto-paste** — your text lands in the focused text box without you switching apps.
+- **History** — every recording is saved on-device with the audio. Replay, retry, or delete from the History tab.
+- **Free to run** — Groq's free tier handles dictation forever; bring your own key, your audio never goes to a server we own.
 
-## Building
+---
 
-Once Android Studio Hedgehog (or later) is installed:
+## Privacy
 
-```
+- Your API key lives in Android Keystore — never leaves the device except as part of a request *you* triggered.
+- Audio + transcripts stay on your phone (default retention: 7 days, 500MB rolling cap; configurable).
+- No accounts. No analytics. No telemetry. No cloud sync.
+
+---
+
+## For developers
+
+- **CLAUDE.md** — entry point for fresh agent sessions, current architecture state.
+- **HANDOVER.md** — last-known-good state, what was just shipped, what's queued next.
+- **PRD.md** — original product spec, locked decisions, open questions.
+- **DESKTOP_LINKAGE.md** — relationship to the [desktop sibling](https://github.com/kumaradarsh1993/wispr-fox).
+
+### Build locally
+
+```bash
 ./gradlew assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-(Nothing to build yet. Code starts after PRD review.)
+CI builds on every tag push (`v*`) and attaches the APK to the GitHub release.
+
+---
+
+## Current version
+
+**v1.1.0** — stable. Home screen rework, bottom nav, history retry + multi-select delete. See the [release notes](https://github.com/kumaradarsh1993/wispr-fox-android/releases/latest) for the full changelog.

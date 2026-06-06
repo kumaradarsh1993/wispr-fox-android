@@ -1,5 +1,11 @@
 # Base prompt — read this FIRST
 
+> ## 🟢 CURRENT STATE — 2026-06-06
+>
+> **The app is built and stable at `v1.1.0`** (commit `4cf396b`).
+>
+> Before reading anything else in this file, **read [HANDOVER.md](./HANDOVER.md)** — it's the single source of truth for what ships today, what's queued, and how to resume work. The sections below are kept for historical context (scope evolution, original design rationale) but the "pre-implementation" framing is no longer accurate.
+
 > ## ⚠ SCOPE UPDATE — 2026-05-24 (overrides parts of this file below)
 >
 > The owner re-scoped the app after the Phase 0/1 work. The "utility-only,
