@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://kumaradarsh1993.github.io/wispr-fox-android/sitemap.xml

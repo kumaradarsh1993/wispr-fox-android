@@ -4,6 +4,8 @@
 
 Built for **Indian English + Hindi code-switching**, long ramble-y recordings, and patchy networks.
 
+Website: https://kumaradarsh1993.github.io/wispr-fox-android/
+
 ---
 
 ## Download & install
