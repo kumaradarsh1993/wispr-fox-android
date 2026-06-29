@@ -17,25 +17,29 @@ This file is the current state-of-the-world for Android. `CLAUDE.md` is useful h
 - Improved basic avatar accessibility semantics.
 - Added `.github/workflows/android-apk-release.yml` so tag pushes build/test/sign/upload an installable APK to GitHub Releases with "Codex build" in the release name.
 
-## Current release plan
+## Published preview release
 
-- Tag to push: `v1.2.0-codex.2`
-- Expected APK asset: `wispr-fox-android-v1.2.0-codex.2.apk`
+- Tag: `v1.2.0-codex.2`
+- Release URL: `https://github.com/kumaradarsh1993/wispr-fox-android/releases/tag/v1.2.0-codex.2`
+- APK asset: `wispr-fox-android-v1.2.0-codex.2.apk`
+- APK SHA-256: `e3316147f974e404b6a207e52f8c9f4ef798056dd67023cdef284be6a4bf2c48`
 - Release name from CI: `wispr-fox Android v1.2.0-codex.2 - Codex build`
+- GitHub Actions run `28379653886` passed on 2026-06-29.
 - The workflow uses repository signing secrets when available:
   - `ANDROID_SIGNING_KEY_B64`
   - `ANDROID_SIGNING_STORE_PASSWORD`
   - `ANDROID_SIGNING_KEY_ALIAS`
   - `ANDROID_SIGNING_KEY_PASSWORD`
-- If those secrets are absent, CI generates a temporary Codex preview signing key. That produces an installable APK, but upgrades from older APKs may require uninstall/reinstall.
+- The repository signing secrets were absent for `v1.2.0-codex.2`, so CI generated a temporary Codex preview signing key. That produces an installable APK, but upgrades from older APKs may require uninstall/reinstall.
 
 ## Verification already done
 
 ```bash
 ./gradlew.bat testDebugUnitTest
+./gradlew.bat testDebugUnitTest assembleRelease
 ```
 
-Result: passed.
+Result: passed locally. The tag workflow also passed and attached the APK to the GitHub prerelease.
 
 ## Still needs real-device QA
 

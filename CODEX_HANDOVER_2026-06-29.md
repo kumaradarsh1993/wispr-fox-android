@@ -43,20 +43,21 @@ The owner asked Codex to continue after the desktop wispr-fox work and then hand
 
 ## Why this is a Codex preview, not stable
 
-The code compiles and unit tests pass, but no physical S23 Ultra QA was run in this session. The APK workflow may also use a temporary Codex preview signing key until repository signing secrets are configured. Treat `v1.2.0-codex.2` as a preview release until real-device install, permission, recording, paste, and provider-key paths are validated.
+The code compiles, unit tests pass, and GitHub Actions published `v1.2.0-codex.2` as a prerelease. No physical S23 Ultra QA was run in this session. The APK used a temporary Codex preview signing key because repository signing secrets were not configured, so treat this as a preview release until real-device install, permission, recording, paste, and provider-key paths are validated.
 
 ## Verification run
 
 ```bash
 ./gradlew.bat testDebugUnitTest
+./gradlew.bat testDebugUnitTest assembleRelease
 ```
 
-Result: passed.
+Result: passed locally. GitHub Actions run `28379653886` also passed and published `wispr-fox-android-v1.2.0-codex.2.apk` with SHA-256 `e3316147f974e404b6a207e52f8c9f4ef798056dd67023cdef284be6a4bf2c48`.
 
 ## Follow-up for Claude or another Codex session
 
-1. Run `./gradlew.bat assembleDebug` locally if you need a local APK smoke test.
-2. Push tag `v1.2.0-codex.2` and verify GitHub Actions attaches `wispr-fox-android-v1.2.0-codex.2.apk`.
-3. Configure persistent Android signing secrets in GitHub before stable promotion.
-4. Do the S23 Ultra matrix in `HANDOVER.md`.
+1. Install the APK on a real S23 Ultra or current Samsung device.
+2. Configure persistent Android signing secrets in GitHub before stable promotion.
+3. Do the S23 Ultra matrix in `HANDOVER.md`.
+4. If the preview signing key causes an upgrade failure, uninstall the older APK first or rebuild after adding persistent signing secrets.
 5. If avatar polish becomes the next focus, port the desktop raster-pack manifest idea rather than only scaling the current PNG/Compose avatar.
