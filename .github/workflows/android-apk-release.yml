@@ -27,6 +27,11 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Verify Room migration schemas
+        run: |
+          test -s app/schemas/com.wisprfox.android.history.AppDatabase/1.json
+          test -s app/schemas/com.wisprfox.android.history.AppDatabase/2.json
+
       - name: Test and build release APK
         run: |
           chmod +x ./gradlew

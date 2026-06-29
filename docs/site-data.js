@@ -16,8 +16,8 @@ window.PRODUCT_SITE = {
   downloads: [
     {
       label: "Download APK",
-      note: "Codex preview v1.2.0-codex.1",
-      href: "https://github.com/kumaradarsh1993/wispr-fox-android/releases/download/v1.2.0-codex.1/wispr-fox-android-v1.2.0-codex.1.apk"
+      note: "Codex preview v1.2.0-codex.2",
+      href: "https://github.com/kumaradarsh1993/wispr-fox-android/releases/download/v1.2.0-codex.2/wispr-fox-android-v1.2.0-codex.2.apk"
     },
     {
       label: "All releases",

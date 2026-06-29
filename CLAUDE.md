@@ -2,7 +2,7 @@
 
 > ## 🟢 CURRENT STATE — 2026-06-06
 >
-> **Codex preview `v1.2.0-codex.1` is the active working checkpoint.** Last Claude stable remains `v1.1.0` (commit `4cf396b`).
+> **Codex preview `v1.2.0-codex.2` is the active working checkpoint.** Last Claude stable remains `v1.1.0` (commit `4cf396b`).
 >
 > Also read [CODEX_HANDOVER_2026-06-29.md](./CODEX_HANDOVER_2026-06-29.md) after [HANDOVER.md](./HANDOVER.md).
 >

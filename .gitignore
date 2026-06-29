@@ -13,4 +13,6 @@ captures/
 *.jks
 keys.properties
 schemas/
+!app/schemas/
+!app/schemas/**
 .kotlin/

@@ -1,4 +1,4 @@
-# wispr-fox Android v1.2.0-codex.1 - Codex preview
+# wispr-fox Android v1.2.0-codex.2 - Codex preview
 
 This is a Codex preview build. It is meant for testing before any stable promotion.
 

@@ -6,7 +6,7 @@ Built for **Indian English + Hindi code-switching**, long ramble-y recordings, a
 
 Website: https://kumaradarsh1993.github.io/wispr-fox-android/
 
-Codex preview download: [wispr-fox-android-v1.2.0-codex.1.apk](https://github.com/kumaradarsh1993/wispr-fox-android/releases/download/v1.2.0-codex.1/wispr-fox-android-v1.2.0-codex.1.apk)
+Codex preview download: [wispr-fox-android-v1.2.0-codex.2.apk](https://github.com/kumaradarsh1993/wispr-fox-android/releases/download/v1.2.0-codex.2/wispr-fox-android-v1.2.0-codex.2.apk)
 
 Last Claude stable: [v1.1.0 app-debug.apk](https://github.com/kumaradarsh1993/wispr-fox-android/releases/download/v1.1.0/app-debug.apk)
 
@@ -65,6 +65,6 @@ CI builds on every tag push (`v*`) and attaches an installable APK to the GitHub
 
 ## Current version
 
-**v1.2.0-codex.1** - Codex preview. Adds multi-provider STT, OpenAI cleanup, safer Android recording/paste handling, and GitHub APK automation.
+**v1.2.0-codex.2** - Codex preview. Adds multi-provider STT, OpenAI cleanup, safer Android recording/paste handling, and GitHub APK automation.
 
 **v1.1.0** remains the last Claude stable checkpoint.

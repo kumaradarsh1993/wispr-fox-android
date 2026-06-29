@@ -43,7 +43,7 @@ The owner asked Codex to continue after the desktop wispr-fox work and then hand
 
 ## Why this is a Codex preview, not stable
 
-The code compiles and unit tests pass, but no physical S23 Ultra QA was run in this session. The APK workflow may also use a temporary Codex preview signing key until repository signing secrets are configured. Treat `v1.2.0-codex.1` as a preview release until real-device install, permission, recording, paste, and provider-key paths are validated.
+The code compiles and unit tests pass, but no physical S23 Ultra QA was run in this session. The APK workflow may also use a temporary Codex preview signing key until repository signing secrets are configured. Treat `v1.2.0-codex.2` as a preview release until real-device install, permission, recording, paste, and provider-key paths are validated.
 
 ## Verification run
 
@@ -56,7 +56,7 @@ Result: passed.
 ## Follow-up for Claude or another Codex session
 
 1. Run `./gradlew.bat assembleDebug` locally if you need a local APK smoke test.
-2. Push tag `v1.2.0-codex.1` and verify GitHub Actions attaches `wispr-fox-android-v1.2.0-codex.1.apk`.
+2. Push tag `v1.2.0-codex.2` and verify GitHub Actions attaches `wispr-fox-android-v1.2.0-codex.2.apk`.
 3. Configure persistent Android signing secrets in GitHub before stable promotion.
 4. Do the S23 Ultra matrix in `HANDOVER.md`.
 5. If avatar polish becomes the next focus, port the desktop raster-pack manifest idea rather than only scaling the current PNG/Compose avatar.

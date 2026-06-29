@@ -1,6 +1,6 @@
 # HANDOVER - wispr-fox-android
 
-> Last update: 2026-06-29. Current Codex preview: **v1.2.0-codex.1**. Last Claude stable: **v1.1.0** at commit `4cf396b`.
+> Last update: 2026-06-29. Current Codex preview: **v1.2.0-codex.2**. Last Claude stable: **v1.1.0** at commit `4cf396b`.
 
 This file is the current state-of-the-world for Android. `CLAUDE.md` is useful historical context, but this handover wins when they disagree.
 
@@ -19,9 +19,9 @@ This file is the current state-of-the-world for Android. `CLAUDE.md` is useful h
 
 ## Current release plan
 
-- Tag to push: `v1.2.0-codex.1`
-- Expected APK asset: `wispr-fox-android-v1.2.0-codex.1.apk`
-- Release name from CI: `wispr-fox Android v1.2.0-codex.1 - Codex build`
+- Tag to push: `v1.2.0-codex.2`
+- Expected APK asset: `wispr-fox-android-v1.2.0-codex.2.apk`
+- Release name from CI: `wispr-fox Android v1.2.0-codex.2 - Codex build`
 - The workflow uses repository signing secrets when available:
   - `ANDROID_SIGNING_KEY_B64`
   - `ANDROID_SIGNING_STORE_PASSWORD`
