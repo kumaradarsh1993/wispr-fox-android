@@ -53,6 +53,7 @@
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       line-height: 1.5;
       letter-spacing: 0;
+      overflow-x: hidden;
     }
     a { color: inherit; text-decoration: none; }
     button { font: inherit; }
@@ -90,14 +91,26 @@
         linear-gradient(90deg, rgba(248,247,243,0.98) 0%, rgba(248,247,243,0.83) 42%, rgba(248,247,243,0.28) 100%),
         linear-gradient(135deg, #fff5df 0%, #eef5ff 48%, #eaf8f5 100%);
     }
+    .hero-canvas {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      width: 100%;
+      height: 100%;
+      opacity: 0.72;
+      pointer-events: none;
+    }
     .hero-inner {
       width: min(100%, var(--max));
       margin: 0 auto;
+      position: relative;
+      z-index: 1;
       display: grid;
       grid-template-columns: minmax(300px, 520px) 1fr;
       gap: 34px;
       align-items: center;
     }
+    .hero-inner > * { min-width: 0; }
     .eyebrow {
       display: inline-flex;
       align-items: center;
@@ -126,6 +139,43 @@
     }
     .button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
     .button:hover { transform: translateY(-1px); }
+    .download-buttons {
+      display: grid;
+      grid-template-columns: minmax(220px, 1.1fr) minmax(160px, 0.9fr);
+      gap: 10px;
+      max-width: 520px;
+      margin-top: 28px;
+    }
+    .download-button {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      min-height: 62px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #fff;
+      box-shadow: 0 12px 30px rgba(38, 34, 25, 0.1);
+      font-weight: 850;
+    }
+    .download-button.primary {
+      color: #fff;
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+    .download-button small {
+      margin-top: 2px;
+      color: currentColor;
+      opacity: 0.72;
+      font-size: 12px;
+      font-weight: 750;
+    }
+    .secondary-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 12px;
+    }
     .search-phrase { margin-top: 18px; color: #707166; font-size: 13px; }
     .phone-wrap {
       display: grid;
@@ -232,12 +282,18 @@
       .links a:not(.repo) { display: none; }
     }
     @media (max-width: 620px) {
-      .hero { padding-top: 92px; }
+      .hero { padding: 92px 34px 54px 18px; }
+      .hero-inner { width: 100%; max-width: 100%; }
+      .hero-inner > div:first-child { width: min(320px, calc(100vw - 96px)); max-width: min(320px, calc(100vw - 96px)); }
       h1 { font-size: 39px; }
       .lede { font-size: 17px; }
       .phone-wrap { min-height: auto; }
       .phone { min-height: 600px; }
       .screen { min-height: 580px; }
+      .links .repo { display: none; }
+      .hero-canvas { opacity: 0.28; }
+      .download-buttons, .phone-wrap, .phone { width: 100%; max-width: min(320px, calc(100vw - 96px)); }
+      .download-buttons { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -259,13 +315,18 @@
 
   <main id="top">
     <section class="hero" aria-labelledby="hero-title">
+      <canvas class="hero-canvas" data-three-hero data-scene="android" data-accent="#2267d8" data-accent-two="#11856f" data-accent-three="#cb4d5a" aria-hidden="true"></canvas>
       <div class="hero-inner">
         <div>
           <span class="eyebrow">Android dictation bubble</span>
           <h1 id="hero-title">Talk. Tap. Done.</h1>
           <p class="lede">wispr-fox for Android drops speech into the text field you are already using. It is tuned for Indian English, Hindi code-switching, long rambling recordings, and patchy networks.</p>
-          <div class="cta">
-            <a class="button primary" href="https://github.com/kumaradarsh1993/wispr-fox-android/releases">Download APK</a>
+          <div class="download-buttons" aria-label="Stable downloads">
+            <a class="download-button primary" href="https://github.com/kumaradarsh1993/wispr-fox-android/releases/download/v1.1.0/app-debug.apk">Download APK<small>Stable v1.1.0</small></a>
+            <a class="download-button" href="https://github.com/kumaradarsh1993/wispr-fox-android/releases">Older builds<small>Release archive</small></a>
+          </div>
+          <div class="secondary-links">
+            <a class="button" href="https://github.com/kumaradarsh1993/wispr-fox-android#readme">Setup notes</a>
             <a class="button" href="https://github.com/kumaradarsh1993/wispr-fox-android">View source</a>
           </div>
           <p class="search-phrase">Open-source Android voice dictation with floating bubble activation and auto-paste.</p>
@@ -390,5 +451,7 @@
       phoneState.textContent = recording ? "Recording..." : `Auto-pasted ${activeMode}`;
     });
   </script>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <script type="module" src="hero-scene.js"></script>
 </body>
 </html>

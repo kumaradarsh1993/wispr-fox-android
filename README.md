@@ -6,11 +6,13 @@ Built for **Indian English + Hindi code-switching**, long ramble-y recordings, a
 
 Website: https://kumaradarsh1993.github.io/wispr-fox-android/
 
+Stable download: [app-debug.apk](https://github.com/kumaradarsh1993/wispr-fox-android/releases/download/v1.1.0/app-debug.apk)
+
 ---
 
 ## Download & install
 
-Grab the latest APK from the **[Releases page](https://github.com/kumaradarsh1993/wispr-fox-android/releases/latest)**.
+Grab the APK above, or open the **[Releases page](https://github.com/kumaradarsh1993/wispr-fox-android/releases/latest)** for release notes.
 
 1. Tap the `app-debug.apk` link on your phone.
 2. Allow "Install from unknown sources" if prompted (Android will guide you).
