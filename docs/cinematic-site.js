@@ -11,7 +11,6 @@ document.documentElement.style.setProperty("--bg", data.theme.bg);
 document.documentElement.style.setProperty("--ink", data.theme.ink);
 
 root.innerHTML = `
-  <div class="world"><canvas id="world-canvas" aria-hidden="true"></canvas></div>
   <header class="nav">
     <div class="nav-inner">
       <a class="brand" href="#top"><span class="mark">${data.mark}</span><span>${data.name}</span></a>
@@ -43,18 +42,21 @@ root.innerHTML = `
             ${data.secondary.map((item) => `<a class="button" href="${item.href}">${item.label}</a>`).join("")}
           </div>
         </div>
-        <div class="product-stage reveal">
-          <div class="stage-top"><strong>${data.stage.title}</strong><span>${data.stage.status}</span></div>
-          <div class="stage-body">
-            <aside class="stage-rail">
-              ${data.stage.rail.map((item, index) => `<div class="rail-item ${index === 0 ? "active" : ""}"><span>${item[0]}</span><strong>${item[1]}</strong></div>`).join("")}
-            </aside>
-            <div class="mock-surface">
-              <p class="surface-title">${data.stage.surfaceTitle}</p>
-              <div class="surface-grid">
-                ${data.stage.tiles.map(() => `<div class="surface-tile"></div>`).join("")}
+        <div class="hero-visual reveal">
+          <div class="world"><canvas id="world-canvas" aria-hidden="true"></canvas></div>
+          <div class="product-stage">
+            <div class="stage-top"><strong>${data.stage.title}</strong><span>${data.stage.status}</span></div>
+            <div class="stage-body">
+              <aside class="stage-rail">
+                ${data.stage.rail.map((item, index) => `<div class="rail-item ${index === 0 ? "active" : ""}" data-rail="${index}"><span>${item[0]}</span><strong>${item[1]}</strong></div>`).join("")}
+              </aside>
+              <div class="mock-surface">
+                <p class="surface-title">${data.stage.surfaceTitle}</p>
+                <div class="surface-grid">
+                  ${data.stage.tiles.map((tile, index) => `<div class="surface-tile ${index === 0 ? "active" : ""}" data-tile="${index}"><span>${tile}</span></div>`).join("")}
+                </div>
+                <p class="surface-note">${data.stage.note}</p>
               </div>
-              <p class="surface-note">${data.stage.note}</p>
             </div>
           </div>
         </div>
@@ -66,16 +68,40 @@ root.innerHTML = `
         <h2>${data.storyTitle}</h2>
         <p>${data.storyIntro}</p>
       </div>
-      <div class="chapters">
-        ${data.chapters.map((chapter, index) => `
-          <article class="chapter" data-scene-step="${index}">
-            <div class="chapter-card reveal">
-              <span class="chapter-index">${String(index + 1).padStart(2, "0")}</span>
-              <h3>${chapter.title}</h3>
-              <p>${chapter.body}</p>
+      <div class="story-flow">
+        <aside class="story-demo reveal" aria-live="polite">
+          <div class="demo-shell">
+            <div class="demo-toolbar">
+              <span id="demo-step-label">Step 01</span>
+              <strong id="demo-mode">${data.stage.rail[0]?.[0] || "Flow"}</strong>
             </div>
-          </article>
-        `).join("")}
+            <div class="demo-screen" id="demo-screen">
+              <div class="demo-visual" id="demo-visual"></div>
+              <div class="demo-copy">
+                <span id="demo-progress-copy">1 of ${data.chapters.length}</span>
+                <h3 id="demo-title">${data.chapters[0].title}</h3>
+                <p id="demo-body">${data.chapters[0].body}</p>
+              </div>
+            </div>
+            <div class="demo-footer">
+              <div class="demo-meter"><span id="demo-meter"></span></div>
+              <div class="demo-dots">
+                ${data.chapters.map((_, index) => `<span class="${index === 0 ? "active" : ""}" data-demo-dot="${index}"></span>`).join("")}
+              </div>
+            </div>
+          </div>
+        </aside>
+        <div class="chapters">
+          ${data.chapters.map((chapter, index) => `
+            <article class="chapter" data-scene-step="${index}">
+              <div class="chapter-card reveal ${index === 0 ? "active" : ""}">
+                <span class="chapter-index">${String(index + 1).padStart(2, "0")}</span>
+                <h3>${chapter.title}</h3>
+                <p>${chapter.body}</p>
+              </div>
+            </article>
+          `).join("")}
+        </div>
       </div>
     </section>
 
@@ -115,6 +141,11 @@ root.innerHTML = `
   </footer>
 `;
 
+let sceneTarget = 0;
+let demoRefs = {};
+
+setupScrollDemo();
+setupScrollSpy();
 setupAnimation();
 setupWorld();
 
@@ -143,17 +174,108 @@ function setupAnimation() {
   gsap.utils.toArray(".chapter").forEach((chapter, index) => {
     window.ScrollTrigger.create({
       trigger: chapter,
-      start: "top 55%",
-      end: "bottom 45%",
-      onEnter: () => setSceneTarget(index + 1),
-      onEnterBack: () => setSceneTarget(index + 1)
+      start: "top 54%",
+      end: "bottom 46%",
+      onEnter: () => setSceneTarget(index),
+      onEnterBack: () => setSceneTarget(index)
     });
   });
 }
 
-let sceneTarget = 0;
+function setupScrollDemo() {
+  demoRefs = {
+    label: document.querySelector("#demo-step-label"),
+    mode: document.querySelector("#demo-mode"),
+    screen: document.querySelector("#demo-screen"),
+    visual: document.querySelector("#demo-visual"),
+    count: document.querySelector("#demo-progress-copy"),
+    title: document.querySelector("#demo-title"),
+    body: document.querySelector("#demo-body"),
+    meter: document.querySelector("#demo-meter"),
+    dots: [...document.querySelectorAll("[data-demo-dot]")],
+    chapterCards: [...document.querySelectorAll(".chapter-card")],
+    rails: [...document.querySelectorAll("[data-rail]")],
+    tiles: [...document.querySelectorAll("[data-tile]")]
+  };
+  setSceneTarget(0);
+}
+
+function setupScrollSpy() {
+  const chapters = [...document.querySelectorAll(".chapter")];
+  if (!chapters.length) return;
+
+  let ticking = false;
+  const update = () => {
+    ticking = false;
+    const center = innerHeight * 0.54;
+    let closest = 0;
+    let closestDistance = Infinity;
+    chapters.forEach((chapter, index) => {
+      const rect = chapter.getBoundingClientRect();
+      const distance = Math.abs(rect.top + rect.height * 0.5 - center);
+      if (distance < closestDistance) {
+        closest = index;
+        closestDistance = distance;
+      }
+    });
+    setSceneTarget(closest);
+  };
+  const queueUpdate = () => {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(update);
+  };
+
+  window.addEventListener("scroll", queueUpdate, { passive: true });
+  window.addEventListener("resize", queueUpdate, { passive: true });
+  queueUpdate();
+}
+
 function setSceneTarget(value) {
-  sceneTarget = value;
+  const last = data.chapters.length - 1;
+  const index = Math.max(0, Math.min(last, value));
+  sceneTarget = index;
+
+  if (!demoRefs.visual) return;
+
+  const chapter = data.chapters[index];
+  const rail = data.stage.rail[index % data.stage.rail.length] || ["Flow", "Ready"];
+  if (demoRefs.label) demoRefs.label.textContent = `Step ${String(index + 1).padStart(2, "0")}`;
+  if (demoRefs.mode) demoRefs.mode.textContent = `${rail[0]} / ${rail[1]}`;
+  if (demoRefs.count) demoRefs.count.textContent = `${index + 1} of ${data.chapters.length}`;
+  if (demoRefs.title) demoRefs.title.textContent = chapter.title;
+  if (demoRefs.body) demoRefs.body.textContent = chapter.body;
+  if (demoRefs.screen) demoRefs.screen.dataset.step = String(index);
+  demoRefs.visual.innerHTML = renderDemoVisual(index, rail);
+  if (demoRefs.meter) demoRefs.meter.style.width = `${((index + 1) / data.chapters.length) * 100}%`;
+
+  demoRefs.dots.forEach((dot, dotIndex) => dot.classList.toggle("active", dotIndex === index));
+  demoRefs.chapterCards.forEach((card, cardIndex) => card.classList.toggle("active", cardIndex === index));
+  demoRefs.rails.forEach((item, railIndex) => item.classList.toggle("active", railIndex === index % data.stage.rail.length));
+  demoRefs.tiles.forEach((tile, tileIndex) => tile.classList.toggle("active", tileIndex % data.chapters.length === index));
+}
+
+function renderDemoVisual(index, rail) {
+  const tiles = data.stage.tiles.slice(0, 9);
+  const lines = Array.from({ length: 5 }, (_, lineIndex) => {
+    const width = 42 + ((lineIndex * 17 + index * 19) % 45);
+    return `<span style="--w:${width}%"></span>`;
+  }).join("");
+  const cells = tiles.map((tile, tileIndex) => {
+    const active = tileIndex % data.chapters.length === index ? "active" : "";
+    return `<span class="demo-cell ${active}" style="--delay:${tileIndex * 45}ms">${tile}</span>`;
+  }).join("");
+
+  return `
+    <div class="demo-grid" data-scene="${data.scene}">
+      ${cells}
+    </div>
+    <div class="demo-result">
+      <span>${rail[0]}</span>
+      <strong>${rail[1]}</strong>
+      <div class="demo-lines">${lines}</div>
+    </div>
+  `;
 }
 
 const pointer = { x: 0, y: 0 };
@@ -195,16 +317,15 @@ function setupWorld() {
   function tick(now) {
     resize();
     const t = now * 0.001;
-    const scroll = document.documentElement.scrollTop / Math.max(1, document.documentElement.scrollHeight - innerHeight);
-    const target = sceneTarget + scroll * 1.8;
+    const target = sceneTarget * 0.55;
     group.rotation.y += ((target * 0.32 + pointer.x * 0.18) - group.rotation.y) * 0.035;
     group.rotation.x += ((Math.sin(t * 0.4) * 0.08 - pointer.y * 0.12) - group.rotation.x) * 0.04;
     group.position.y = Math.sin(t * 0.35) * 0.08;
-    group.position.x = innerWidth < 620 ? 2.2 : innerWidth < 900 ? 0.7 : 1.45;
-    group.scale.setScalar(innerWidth < 620 ? 0.42 : innerWidth < 900 ? 0.72 : 1);
+    group.position.x = innerWidth < 620 ? 0.72 : innerWidth < 900 ? 0.35 : 0.78;
+    group.scale.setScalar(innerWidth < 620 ? 0.54 : innerWidth < 900 ? 0.74 : 0.92);
     if (!reduceMotion) {
       group.children.forEach((child, index) => {
-        if (child.userData.float) child.position.y += Math.sin(t * child.userData.float + index) * 0.0015;
+        if (child.userData.float) child.position.y = child.userData.baseY + Math.sin(t * child.userData.float + index) * 0.035;
       });
     }
     renderer.render(scene, camera);
@@ -277,13 +398,16 @@ function addField(group) {
     positions.push((Math.random() - 0.5) * 8, (Math.random() - 0.5) * 5, (Math.random() - 0.5) * 3 - 0.5);
   }
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  group.add(new THREE.Points(geometry, new THREE.PointsMaterial({ color: data.theme.accent, size: 0.018, transparent: true, opacity: 0.42 })));
+  const field = new THREE.Points(geometry, new THREE.PointsMaterial({ color: data.theme.accent, size: 0.018, transparent: true, opacity: 0.32 }));
+  field.userData.baseY = field.position.y;
+  group.add(field);
 }
 
 function addPanel(group, x, y, z, w, h, d, color) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(color));
   mesh.position.set(x, y, z);
   mesh.userData.float = 0.7 + Math.random();
+  mesh.userData.baseY = y;
   group.add(mesh);
   return mesh;
 }
