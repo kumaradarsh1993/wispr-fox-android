@@ -48,6 +48,10 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -163,6 +167,14 @@ fun AvatarOverlay(
             modifier = Modifier
                 .size(FOX_SIZE)
                 .scale(breathe)
+                .semantics {
+                    role = Role.Button
+                    contentDescription = if (snapshot.pipeline == PipelineState.RECORDING) {
+                        "Stop wispr-fox recording"
+                    } else {
+                        "Start wispr-fox dictation"
+                    }
+                }
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onTap = { if (menuOpen) menuOpen = false else onTap() },

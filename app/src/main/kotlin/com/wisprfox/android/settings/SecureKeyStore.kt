@@ -23,6 +23,10 @@ class SecureKeyStore(context: Context) {
     enum class Key(val pref: String) {
         GroqStt("groq_stt"),
         GroqLlm("groq_llm"),
+        OpenAiStt("openai_stt"),
+        OpenAiLlm("openai_llm"),
+        DeepgramStt("deepgram_stt"),
+        ElevenLabsStt("elevenlabs_stt"),
         GeminiLlm("gemini_llm"),
     }
 

@@ -2,7 +2,9 @@
 
 > ## 🟢 CURRENT STATE — 2026-06-06
 >
-> **The app is built and stable at `v1.1.0`** (commit `4cf396b`).
+> **Codex preview `v1.2.0-codex.1` is the active working checkpoint.** Last Claude stable remains `v1.1.0` (commit `4cf396b`).
+>
+> Also read [CODEX_HANDOVER_2026-06-29.md](./CODEX_HANDOVER_2026-06-29.md) after [HANDOVER.md](./HANDOVER.md).
 >
 > Before reading anything else in this file, **read [HANDOVER.md](./HANDOVER.md)** — it's the single source of truth for what ships today, what's queued, and how to resume work. The sections below are kept for historical context (scope evolution, original design rationale) but the "pre-implementation" framing is no longer accurate.
 

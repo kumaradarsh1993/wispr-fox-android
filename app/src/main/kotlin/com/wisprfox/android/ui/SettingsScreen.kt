@@ -5,6 +5,8 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -41,13 +43,14 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.wisprfox.android.WisprFoxApp
 import com.wisprfox.android.provider.DictationMode
+import com.wisprfox.android.provider.ProviderCatalog
 import com.wisprfox.android.settings.AppSettings
 import com.wisprfox.android.settings.SecureKeyStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(onBack: () -> Unit, onReplayOnboarding: () -> Unit = {}) {
     val ctx = LocalContext.current
@@ -71,28 +74,47 @@ fun SettingsScreen(onBack: () -> Unit, onReplayOnboarding: () -> Unit = {}) {
             Modifier.fillMaxSize().padding(inner).verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            SectionTitle("Provider & keys")
-            KeyField("Groq API key", SecureKeyStore.Key.GroqStt, container.secrets)
-            KeyField("Gemini API key", SecureKeyStore.Key.GeminiLlm, container.secrets)
-            Text(
-                "Whisper transcription always uses your Groq key. The cleanup/reformat step uses the LLM provider below.",
-                style = MaterialTheme.typography.bodySmall,
+            SectionTitle("Speech-to-text")
+            Text("Pick the service that hears you best. Groq stays the default for existing installs.", style = MaterialTheme.typography.bodySmall)
+            ProviderChipRow(
+                options = ProviderCatalog.sttProviders,
+                selected = settings.sttProvider,
+                onSelect = { scope.launch { container.settingsStore.setSttProvider(it) } },
             )
+            ModelChipRow(
+                options = ProviderCatalog.sttModelsFor(settings.sttProvider),
+                selected = settings.sttModel,
+                onSelect = { scope.launch { container.settingsStore.setSttModel(it) } },
+            )
+            KeyField("Groq STT key", SecureKeyStore.Key.GroqStt, container.secrets)
+            KeyField("OpenAI key", SecureKeyStore.Key.OpenAiStt, container.secrets)
+            KeyField("Deepgram key", SecureKeyStore.Key.DeepgramStt, container.secrets)
+            KeyField("ElevenLabs key", SecureKeyStore.Key.ElevenLabsStt, container.secrets)
 
             HorizontalDivider()
-            SectionTitle("LLM provider")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = settings.llmProvider == AppSettings.PROVIDER_GROQ,
-                    onClick = { scope.launch { container.settingsStore.setLlmProvider(AppSettings.PROVIDER_GROQ) } },
-                    label = { Text("Groq (Llama)") },
-                )
-                FilterChip(
-                    selected = settings.llmProvider == AppSettings.PROVIDER_GEMINI,
-                    onClick = { scope.launch { container.settingsStore.setLlmProvider(AppSettings.PROVIDER_GEMINI) } },
-                    label = { Text("Gemini") },
-                )
-            }
+            SectionTitle("Cleanup")
+            Text("Raw mode skips cleanup. Clean and Draft use the provider/model here.", style = MaterialTheme.typography.bodySmall)
+            ProviderChipRow(
+                options = ProviderCatalog.llmProviders,
+                selected = settings.llmProvider,
+                onSelect = { scope.launch { container.settingsStore.setLlmProvider(it) } },
+            )
+            ModelChipRow(
+                options = ProviderCatalog.llmModelsFor(settings.llmProvider),
+                selected = settings.activeLlmModel,
+                onSelect = { model ->
+                    scope.launch {
+                        when (settings.llmProvider) {
+                            AppSettings.PROVIDER_OPENAI -> container.settingsStore.setOpenAiLlmModel(model)
+                            AppSettings.PROVIDER_GEMINI -> container.settingsStore.setGeminiModel(model)
+                            else -> container.settingsStore.setGroqLlmModel(model)
+                        }
+                    }
+                },
+            )
+            KeyField("Groq cleanup key (optional)", SecureKeyStore.Key.GroqLlm, container.secrets)
+            KeyField("OpenAI cleanup key", SecureKeyStore.Key.OpenAiLlm, container.secrets)
+            KeyField("Gemini cleanup key", SecureKeyStore.Key.GeminiLlm, container.secrets)
 
             HorizontalDivider()
             SectionTitle("Default tap mode")
@@ -144,7 +166,7 @@ fun SettingsScreen(onBack: () -> Unit, onReplayOnboarding: () -> Unit = {}) {
 
             HorizontalDivider()
             SectionTitle("About")
-            Text("wispr-fox for Android — bring-your-own-key dictation. Whisper + Groq/Gemini. Your audio and keys stay on this device.", style = MaterialTheme.typography.bodySmall)
+            Text("wispr-fox for Android - bring-your-own-key dictation. Audio is sent only to the provider you choose for that request; keys stay encrypted on this phone.", style = MaterialTheme.typography.bodySmall)
             OutlinedButton(onClick = onReplayOnboarding, modifier = Modifier.fillMaxWidth()) {
                 Text("Replay setup guide")
             }
@@ -161,10 +183,52 @@ private fun ModeOption(label: String, mode: DictationMode, current: DictationMod
     FilterChip(selected = current == mode, onClick = { onSelect(mode) }, label = { Text(label) })
 }
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ProviderChipRow(
+    options: List<ProviderCatalog.ProviderOption>,
+    selected: String,
+    onSelect: (String) -> Unit,
+) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        options.forEach { option ->
+            FilterChip(
+                selected = selected == option.id,
+                onClick = { onSelect(option.id) },
+                label = { Text("${option.label} · ${option.summary}") },
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ModelChipRow(
+    options: List<ProviderCatalog.ModelOption>,
+    selected: String,
+    onSelect: (String) -> Unit,
+) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        options.forEach { option ->
+            FilterChip(
+                selected = selected == option.id,
+                onClick = { onSelect(option.id) },
+                label = { Text(option.label) },
+            )
+        }
+    }
+}
+
 @Composable
 private fun ToggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, style = MaterialTheme.typography.bodyLarge)
+        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f).padding(end = 12.dp))
         Switch(checked = checked, onCheckedChange = onChange)
     }
 }

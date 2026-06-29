@@ -21,6 +21,7 @@ data class Recording(
     val draftedText: String?,
     val sttProvider: String?,
     val llmProvider: String?,
+    val targetPackage: String?,
     val clippyUsed: Boolean,
     val clippyNote: String?,
     val retryCount: Int,
@@ -47,6 +48,7 @@ private fun RecordingEntity.toDomain() = Recording(
     draftedText = draftedText,
     sttProvider = sttProvider,
     llmProvider = llmProvider,
+    targetPackage = targetPackage,
     clippyUsed = clippyUsed,
     clippyNote = clippyNote,
     retryCount = retryCount,
@@ -59,7 +61,7 @@ private fun RecordingEntity.toDomain() = Recording(
  */
 class RecordingRepository(private val dao: RecordingDao) {
 
-    suspend fun newRecording(audioPath: String, mode: DictationMode): String {
+    suspend fun newRecording(audioPath: String, mode: DictationMode, targetPackage: String?): String {
         val id = UUID.randomUUID().toString()
         dao.insert(
             RecordingEntity(
@@ -68,6 +70,7 @@ class RecordingRepository(private val dao: RecordingDao) {
                 audioPath = audioPath,
                 mode = mode.toRaw(),
                 status = RecordingStatus.RECORDING.raw,
+                targetPackage = targetPackage,
             )
         )
         return id

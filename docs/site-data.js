@@ -16,12 +16,12 @@ window.PRODUCT_SITE = {
   downloads: [
     {
       label: "Download APK",
-      note: "Stable v1.1.0",
-      href: "https://github.com/kumaradarsh1993/wispr-fox-android/releases/download/v1.1.0/app-debug.apk"
+      note: "Codex preview v1.2.0-codex.1",
+      href: "https://github.com/kumaradarsh1993/wispr-fox-android/releases/download/v1.2.0-codex.1/wispr-fox-android-v1.2.0-codex.1.apk"
     },
     {
-      label: "Beta builds",
-      note: "Advanced releases",
+      label: "All releases",
+      note: "Stable and preview builds",
       href: "https://github.com/kumaradarsh1993/wispr-fox-android/releases"
     },
     {
@@ -58,12 +58,12 @@ window.PRODUCT_SITE = {
       body: "Send text into the current app, then revisit recent dictations when you need to recover or reuse something."
     }
   ],
-  downloadTitle: "APK first, beta second",
-  downloadIntro: "Start with the stable APK. Beta builds are for people testing newer Android dictation behavior before promotion.",
+  downloadTitle: "APK first, source always visible",
+  downloadIntro: "Start with the Codex preview APK for the newest provider and paste-safety work, or use the release history for the last Claude stable.",
   panels: [
     {
-      title: "Stable APK",
-      body: "The recommended download for regular phone use."
+      title: "Codex preview APK",
+      body: "The newest Android build with multi-provider speech-to-text and safer paste handling."
     },
     {
       title: "Permissions",
@@ -80,7 +80,7 @@ window.PRODUCT_SITE = {
     { title: "Download the APK", body: "Use the stable APK link above from your Android phone." },
     { title: "Allow installation", body: "If Android asks, permit this source for APK installation." },
     { title: "Grant permissions", body: "Enable microphone, overlay, and accessibility permissions as prompted." },
-    { title: "Add your provider key", body: "Enter your Groq or Gemini key, then start dictating from the floating bubble." }
+    { title: "Add your provider key", body: "Enter a Groq, OpenAI, Deepgram, or ElevenLabs key, then start dictating from the floating bubble." }
   ],
   footer: "Open-source Android dictation for fast capture and paste-anywhere workflows."
 };

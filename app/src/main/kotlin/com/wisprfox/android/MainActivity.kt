@@ -16,12 +16,15 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.wisprfox.android.overlay.OverlayService
 import com.wisprfox.android.settings.SecureKeyStore
 import com.wisprfox.android.ui.HistoryScreen
 import com.wisprfox.android.ui.HomeScreen
 import com.wisprfox.android.ui.OnboardingScreen
 import com.wisprfox.android.ui.SettingsScreen
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -35,7 +38,7 @@ class MainActivity : ComponentActivity() {
             WisprFoxTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = androidx.compose.material3.MaterialTheme.colorScheme.background) {
                     val nav = rememberNavController()
-                    val hasKey = WisprFoxApp.container(this).secrets.has(SecureKeyStore.Key.GroqStt)
+                    val hasKey = hasAnySttKey()
                     NavHost(navController = nav, startDestination = if (hasKey) "home" else "onboarding") {
                         composable("onboarding") {
                             OnboardingScreen(onDone = {
@@ -79,8 +82,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (Settings.canDrawOverlays(this)) {
-            startService(Intent(this, OverlayService::class.java))
+        lifecycleScope.launch {
+            val container = WisprFoxApp.container(this@MainActivity)
+            val settings = container.settingsStore.settings.first()
+            if (Settings.canDrawOverlays(this@MainActivity) && settings.overlayBubbleEnabled) {
+                startService(Intent(this@MainActivity, OverlayService::class.java))
+            } else {
+                stopService(Intent(this@MainActivity, OverlayService::class.java))
+            }
         }
     }
 
@@ -94,5 +103,13 @@ class MainActivity : ComponentActivity() {
             != PackageManager.PERMISSION_GRANTED
         ) needed += Manifest.permission.POST_NOTIFICATIONS
         if (needed.isNotEmpty()) permissionLauncher.launch(needed.toTypedArray())
+    }
+
+    private fun hasAnySttKey(): Boolean {
+        val secrets = WisprFoxApp.container(this).secrets
+        return secrets.has(SecureKeyStore.Key.GroqStt) ||
+            secrets.has(SecureKeyStore.Key.OpenAiStt) ||
+            secrets.has(SecureKeyStore.Key.DeepgramStt) ||
+            secrets.has(SecureKeyStore.Key.ElevenLabsStt)
     }
 }

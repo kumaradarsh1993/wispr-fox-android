@@ -29,6 +29,8 @@ object AppState {
         val elapsedMs: Long = 0,
         val totalBytes: Long = 0,
         val activeRecordingId: String? = null,
+        /** Editable target package captured at recording start, for paste safety. */
+        val targetPackage: String? = null,
         /** Transient bubble/toast text (e.g. "Copied to clipboard"). null = none. */
         val message: String? = null,
         val messageIsError: Boolean = false,

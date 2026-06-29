@@ -37,6 +37,15 @@ class WisprFoxApp : Application() {
         if (!secrets.has(SecureKeyStore.Key.GroqStt) && BuildConfig.DEV_GROQ_KEY.isNotBlank()) {
             secrets.put(SecureKeyStore.Key.GroqStt, BuildConfig.DEV_GROQ_KEY)
         }
+        if (!secrets.has(SecureKeyStore.Key.OpenAiStt) && BuildConfig.DEV_OPENAI_KEY.isNotBlank()) {
+            secrets.put(SecureKeyStore.Key.OpenAiStt, BuildConfig.DEV_OPENAI_KEY)
+        }
+        if (!secrets.has(SecureKeyStore.Key.DeepgramStt) && BuildConfig.DEV_DEEPGRAM_KEY.isNotBlank()) {
+            secrets.put(SecureKeyStore.Key.DeepgramStt, BuildConfig.DEV_DEEPGRAM_KEY)
+        }
+        if (!secrets.has(SecureKeyStore.Key.ElevenLabsStt) && BuildConfig.DEV_ELEVENLABS_KEY.isNotBlank()) {
+            secrets.put(SecureKeyStore.Key.ElevenLabsStt, BuildConfig.DEV_ELEVENLABS_KEY)
+        }
         if (!secrets.has(SecureKeyStore.Key.GeminiLlm) && BuildConfig.DEV_GEMINI_KEY.isNotBlank()) {
             secrets.put(SecureKeyStore.Key.GeminiLlm, BuildConfig.DEV_GEMINI_KEY)
         }

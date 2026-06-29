@@ -9,9 +9,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.wisprfox.android.provider.DictationMode
-import com.wisprfox.android.provider.gemini.GeminiClient
-import com.wisprfox.android.provider.groq.GroqChatClient
-import com.wisprfox.android.provider.groq.GroqWhisperClient
+import com.wisprfox.android.provider.ProviderCatalog
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -21,10 +19,12 @@ import kotlinx.coroutines.flow.map
  * live in [SecureKeyStore], not here.
  */
 data class AppSettings(
-    val sttModel: String = GroqWhisperClient.DEFAULT_MODEL,
-    val llmProvider: String = PROVIDER_GROQ,            // "groq" | "gemini"
-    val groqLlmModel: String = GroqChatClient.DEFAULT_MODEL,
-    val geminiModel: String = GeminiClient.DEFAULT_MODEL,
+    val sttProvider: String = ProviderCatalog.STT_GROQ,
+    val sttModel: String = ProviderCatalog.defaultSttModel(ProviderCatalog.STT_GROQ),
+    val llmProvider: String = ProviderCatalog.LLM_GROQ,
+    val groqLlmModel: String = ProviderCatalog.defaultLlmModel(ProviderCatalog.LLM_GROQ),
+    val openAiLlmModel: String = ProviderCatalog.defaultLlmModel(ProviderCatalog.LLM_OPENAI),
+    val geminiModel: String = ProviderCatalog.defaultLlmModel(ProviderCatalog.LLM_GEMINI),
     /** What a single tap on the avatar does. Long-press always offers all three. */
     val defaultMode: DictationMode = DictationMode.CLEANED,
     val retentionDays: Int = 7,
@@ -39,11 +39,16 @@ data class AppSettings(
     val languageHint: String? = null,
 ) {
     /** The model name to use for the currently selected LLM provider. */
-    val activeLlmModel: String get() = if (llmProvider == PROVIDER_GEMINI) geminiModel else groqLlmModel
+    val activeLlmModel: String get() = when (llmProvider) {
+        ProviderCatalog.LLM_GEMINI -> geminiModel
+        ProviderCatalog.LLM_OPENAI -> openAiLlmModel
+        else -> groqLlmModel
+    }
 
     companion object {
-        const val PROVIDER_GROQ = "groq"
-        const val PROVIDER_GEMINI = "gemini"
+        const val PROVIDER_GROQ = ProviderCatalog.LLM_GROQ
+        const val PROVIDER_OPENAI = ProviderCatalog.LLM_OPENAI
+        const val PROVIDER_GEMINI = ProviderCatalog.LLM_GEMINI
     }
 }
 
@@ -52,9 +57,11 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 class SettingsStore(private val context: Context) {
 
     private object Keys {
+        val sttProvider = stringPreferencesKey("stt_provider")
         val sttModel = stringPreferencesKey("stt_model")
         val llmProvider = stringPreferencesKey("llm_provider")
         val groqLlmModel = stringPreferencesKey("groq_llm_model")
+        val openAiLlmModel = stringPreferencesKey("openai_llm_model")
         val geminiModel = stringPreferencesKey("gemini_model")
         val defaultMode = stringPreferencesKey("default_mode")
         val retentionDays = intPreferencesKey("retention_days")
@@ -70,11 +77,15 @@ class SettingsStore(private val context: Context) {
 
     private fun Preferences.toSettings(): AppSettings {
         val defaults = AppSettings()
+        val sttProvider = ProviderCatalog.sanitizeSttProvider(this[Keys.sttProvider] ?: defaults.sttProvider)
+        val llmProvider = ProviderCatalog.sanitizeLlmProvider(this[Keys.llmProvider] ?: defaults.llmProvider)
         return AppSettings(
-            sttModel = this[Keys.sttModel] ?: defaults.sttModel,
-            llmProvider = this[Keys.llmProvider] ?: defaults.llmProvider,
-            groqLlmModel = this[Keys.groqLlmModel] ?: defaults.groqLlmModel,
-            geminiModel = this[Keys.geminiModel] ?: defaults.geminiModel,
+            sttProvider = sttProvider,
+            sttModel = ProviderCatalog.sanitizeSttModel(sttProvider, this[Keys.sttModel] ?: defaults.sttModel),
+            llmProvider = llmProvider,
+            groqLlmModel = ProviderCatalog.sanitizeLlmModel(ProviderCatalog.LLM_GROQ, this[Keys.groqLlmModel] ?: defaults.groqLlmModel),
+            openAiLlmModel = ProviderCatalog.sanitizeLlmModel(ProviderCatalog.LLM_OPENAI, this[Keys.openAiLlmModel] ?: defaults.openAiLlmModel),
+            geminiModel = ProviderCatalog.sanitizeLlmModel(ProviderCatalog.LLM_GEMINI, this[Keys.geminiModel] ?: defaults.geminiModel),
             defaultMode = this[Keys.defaultMode]?.let { runCatching { DictationMode.valueOf(it) }.getOrNull() }
                 ?: defaults.defaultMode,
             retentionDays = this[Keys.retentionDays] ?: defaults.retentionDays,
@@ -87,9 +98,17 @@ class SettingsStore(private val context: Context) {
         )
     }
 
+    suspend fun setSttProvider(v: String) = edit {
+        val provider = ProviderCatalog.sanitizeSttProvider(v)
+        it[Keys.sttProvider] = provider
+        it[Keys.sttModel] = ProviderCatalog.defaultSttModel(provider)
+    }
     suspend fun setSttModel(v: String) = edit { it[Keys.sttModel] = v }
-    suspend fun setLlmProvider(v: String) = edit { it[Keys.llmProvider] = v }
+    suspend fun setLlmProvider(v: String) = edit {
+        it[Keys.llmProvider] = ProviderCatalog.sanitizeLlmProvider(v)
+    }
     suspend fun setGroqLlmModel(v: String) = edit { it[Keys.groqLlmModel] = v }
+    suspend fun setOpenAiLlmModel(v: String) = edit { it[Keys.openAiLlmModel] = v }
     suspend fun setGeminiModel(v: String) = edit { it[Keys.geminiModel] = v }
     suspend fun setDefaultMode(v: DictationMode) = edit { it[Keys.defaultMode] = v.name }
     suspend fun setRetentionDays(v: Int) = edit { it[Keys.retentionDays] = v }

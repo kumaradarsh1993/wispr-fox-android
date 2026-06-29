@@ -61,6 +61,7 @@ class OverlayService : Service() {
         prefs = getSharedPreferences("overlay", Context.MODE_PRIVATE)
         addOverlay()
         observeVisibility()
+        observeEnabled()
     }
 
     /**
@@ -84,6 +85,18 @@ class OverlayService : Service() {
                 .distinctUntilChanged()
                 .collect { show ->
                     composeView?.visibility = if (show) View.VISIBLE else View.GONE
+                }
+        }
+    }
+
+    private fun observeEnabled() {
+        val container = WisprFoxApp.container(this)
+        serviceScope.launch {
+            container.settingsStore.settings
+                .map { it.overlayBubbleEnabled }
+                .distinctUntilChanged()
+                .collect { enabled ->
+                    if (!enabled) stopSelf()
                 }
         }
     }

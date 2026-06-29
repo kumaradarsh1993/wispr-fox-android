@@ -1,110 +1,69 @@
-# HANDOVER — wispr-fox-android
+# HANDOVER - wispr-fox-android
 
-> Last update: 2026-06-06 · current stable: **v1.1.0** (commit `4cf396b`, tag `v1.1.0`)
+> Last update: 2026-06-29. Current Codex preview: **v1.2.0-codex.1**. Last Claude stable: **v1.1.0** at commit `4cf396b`.
 
-This doc is the single source of truth for "what's the app at right now and what's next." If anything in `CLAUDE.md` or `PRD.md` contradicts this, **this wins** — those older docs were written pre-implementation.
+This file is the current state-of-the-world for Android. `CLAUDE.md` is useful historical context, but this handover wins when they disagree.
 
----
+## What changed in the Codex preview
 
-## What ships today (v1.1.0)
+- Added speech-to-text provider selection for **Groq**, **OpenAI**, **Deepgram**, and **ElevenLabs**.
+- Added cleanup provider selection for **Groq**, **OpenAI**, and **Gemini**.
+- Added secure key slots for OpenAI, Deepgram, and ElevenLabs using the existing Android Keystore-backed storage.
+- Updated onboarding and Settings so a new user can start with any supported STT provider, not only Groq.
+- Added a target-package paste guard: recordings remember the focused editable app at start, and auto-paste only runs if the focused editable package still matches at delivery time.
+- Marked clipboard fallback clips as sensitive to reduce Android clipboard preview leakage.
+- Added microphone/foreground-service startup recovery and a partial wake lock while recording.
+- Made the overlay setting actually stop the overlay service when disabled.
+- Improved basic avatar accessibility semantics.
+- Added `.github/workflows/android-apk-release.yml` so tag pushes build/test/sign/upload an installable APK to GitHub Releases with "Codex build" in the release name.
 
-Stable, installed and verified on **Samsung S23 Ultra (RZCWA1TB26Z)** running Android 14.
+## Current release plan
 
-### Core flow (works end-to-end)
+- Tag to push: `v1.2.0-codex.1`
+- Expected APK asset: `wispr-fox-android-v1.2.0-codex.1.apk`
+- Release name from CI: `wispr-fox Android v1.2.0-codex.1 - Codex build`
+- The workflow uses repository signing secrets when available:
+  - `ANDROID_SIGNING_KEY_B64`
+  - `ANDROID_SIGNING_STORE_PASSWORD`
+  - `ANDROID_SIGNING_KEY_ALIAS`
+  - `ANDROID_SIGNING_KEY_PASSWORD`
+- If those secrets are absent, CI generates a temporary Codex preview signing key. That produces an installable APK, but upgrades from older APKs may require uninstall/reinstall.
 
-- **Activation:** draggable floating fox bubble (overlay service) + Quick Settings tile as secondary trigger.
-- **Gesture model:** tap = start/stop record; long-press = mode picker (Raw / Clean / Draft).
-- **Pipeline:** record → WAV on disk → `TranscribeWorker` (WorkManager, unique-per-id) → Groq Whisper-large-v3-turbo → optional LLM cleanup (Groq Llama or Gemini) → delivery.
-- **Delivery:** AccessibilityService auto-paste into the focused field, clipboard as fallback.
-- **History:** Room DB, audio WAVs on disk, retention sweep (default 7 days / 500MB rolling cap).
-
-### Screens
-
-- **Onboarding** — 3-step multi-step flow (Welcome → Setup → Grant). Mirrors desktop design. Live permission state via lifecycle observer. Family setup-code featured when `BuildConfig.FAMILY_BLOB` is present.
-- **Home** — hero mic, collapsed Setup banner (only shows when permissions missing), Recents card (last 3), bottom NavigationBar (Speak / History).
-- **History** — per-row Retry chip (immediate on ERROR, confirm on success rows), Select mode for multi-delete, overflow → Delete all. All destructive ops wipe the WAV from disk too.
-- **Settings** — provider/model selection (Groq Whisper + Groq Llama/Gemini), per-mode cleanup defaults, retention sliders, "Replay setup guide" link back to onboarding.
-
-### Security baseline
-
-- Secrets in **Android Keystore** (`SecureKeyStore`), no file fallback.
-- API keys never logged or transmitted except in the request the user triggered.
-
----
-
-## What's queued (not started)
-
-| Task | Notes |
-|---|---|
-| **#17 Clipboard-vs-insert randomness** | Confirmed bug, **backlog** per owner. Suspected triggers: Samsung work profile ("your organization does not allow pasting content"), screen-off/app-switch return, very long recordings. Workaround = long-press to paste manually. Need reliable repro before fixing. |
-| **#10 Build hardening** | Release-signed APK + ProGuard sweep + crash boundary review. Currently shipping debug APK to sideloaders. |
-
----
-
-## Release & distribution
-
-- **Repo:** https://github.com/kumaradarsh1993/wispr-fox-android
-- **Tags shipped:** `v1.0` (initial stable at d3391cc), `v1.0.1` (baseline pre-v1.1 at e282baf), `v1.1.0` (current at 4cf396b).
-- **Distribution channel:** sideload only (no Play Store — auto-paste via AccessibilityService is incompatible with current Play policy).
-- **GitHub release:** v1.1.0 has the debug APK attached for end-user download. README points there.
-
----
-
-## How to resume work (for a fresh Claude session)
-
-1. **Read this file first** (you're here).
-2. Read `CLAUDE.md` for the original architectural framing — but treat the "pre-implementation" sections as historical; the code is built.
-3. The desktop sibling at `D:\Claude Code Projects\wispr-fox\` is still the canonical reference for **provider request shapes** (Groq Whisper multipart, Groq Llama, Gemini), **prompt strings** (`src-tauri/src/llm/prompts.rs`), and **retry semantics** (recent `HistoryRow.svelte`).
-4. Build target: **don't run `./gradlew assembleRelease` locally** — RAM-tight machine, rustc-style OOM risk. Debug builds (`assembleDebug`) are fine. CI handles release builds on tag push.
-5. Adb identity: device `RZCWA1TB26Z` (S23 Ultra). Debug variant installs as `com.wisprfox.android.debug`.
-
-### Common commands
+## Verification already done
 
 ```bash
-# Build + install + launch
-cd "D:/Claude Code Projects/wispr-fox-android"
-./gradlew assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-adb shell monkey -p com.wisprfox.android.debug -c android.intent.category.LAUNCHER 1
-
-# Inspect device logs
-adb logcat -s WisprFox:* AndroidRuntime:E
+./gradlew.bat testDebugUnitTest
 ```
 
-### Git identity for commits
+Result: passed.
 
-The repo's commit identity is `wispr-fox dev <dev@wispr-fox.local>`. Use:
+## Still needs real-device QA
 
-```bash
-git -c user.name="wispr-fox dev" -c user.email="dev@wispr-fox.local" commit -m "..."
-```
+Run this on the Samsung S23 Ultra path before calling it stable:
 
----
+- Fresh install, onboarding with each STT key path: Groq, OpenAI, Deepgram, ElevenLabs.
+- Denied microphone permission, denied notification permission, denied overlay, denied accessibility.
+- Start from overlay, Quick Settings tile, and in-app button.
+- Long recording with screen off / battery optimization on and off.
+- App-switch during transcription: expected behavior is clipboard-only, not auto-paste into the new app.
+- Work-profile or Samsung policy paste-block case.
+- Large font and display-size accessibility pass.
+- Install/upgrade behavior for the APK produced by GitHub Actions.
 
-## Key files (where the logic lives)
+## Known tradeoffs
 
-| Area | File |
-|---|---|
-| Activity / nav | `app/src/main/kotlin/com/wisprfox/android/MainActivity.kt` |
-| Bottom nav (shared) | `app/src/main/kotlin/com/wisprfox/android/ui/Nav.kt` |
-| Home | `app/src/main/kotlin/com/wisprfox/android/ui/HomeScreen.kt` |
-| History | `app/src/main/kotlin/com/wisprfox/android/ui/HistoryScreen.kt` |
-| Onboarding | `app/src/main/kotlin/com/wisprfox/android/ui/OnboardingScreen.kt` |
-| Settings | `app/src/main/kotlin/com/wisprfox/android/ui/SettingsScreen.kt` |
-| Overlay service | `app/src/main/kotlin/com/wisprfox/android/overlay/OverlayService.kt` |
-| Accessibility paste | `app/src/main/kotlin/com/wisprfox/android/delivery/` |
-| Recording pipeline | `app/src/main/kotlin/com/wisprfox/android/queue/TranscribeWorker.kt` |
-| Recording repo / DAO | `app/src/main/kotlin/com/wisprfox/android/history/` |
-| Secrets | `app/src/main/kotlin/com/wisprfox/android/settings/SecureKeyStore.kt` |
-| Providers | `app/src/main/kotlin/com/wisprfox/android/provider/` |
+- The target-package paste guard is safer than the previous "paste wherever focus is now" behavior, but it does not yet verify exact field identity. Same-package focus drift can still paste into another field in the same app.
+- Release signing secrets are not configured in this repo by code. Until the owner adds them in GitHub settings, the workflow's fallback Codex preview key is not a stable long-term update key.
+- The Android avatar work remains simpler than the desktop raster avatar SDK. This pass focused on provider/runtime safety and APK automation.
 
----
+## Resume pointers
 
-## Decisions that should not be re-litigated
-
-- **AccessibilityService auto-paste is the default delivery path.** Clipboard is fallback. (Play Store distribution is out of scope; sideload only.)
-- **Bring-your-own-key.** No accounts, no proxy, no telemetry, no crash reporter.
-- **Three modes only** (Raw / Clean / Draft). No prompt editor in-app.
-- **Bottom NavigationBar is 2 tabs** (Speak / History). Settings stays as a top-bar gear — less frequent destination, doesn't earn bottom-bar real estate.
-- **Retry is available on ALL statuses**, not just ERROR (with confirm on non-error). Mirrors desktop; covers stranded mid-pipeline rows.
-- **Delete always removes the WAV from disk** (mirrors retention sweep). Mental model: "delete = gone everywhere."
+- Provider catalogue: `app/src/main/kotlin/com/wisprfox/android/provider/ProviderCatalog.kt`
+- Provider factory: `app/src/main/kotlin/com/wisprfox/android/core/ProviderFactory.kt`
+- New provider clients:
+  - `app/src/main/kotlin/com/wisprfox/android/provider/openai/`
+  - `app/src/main/kotlin/com/wisprfox/android/provider/deepgram/`
+  - `app/src/main/kotlin/com/wisprfox/android/provider/elevenlabs/`
+- Paste safety: `delivery/DeliveryManager.kt`, `delivery/WisprFoxAccessibilityService.kt`, `history/RecordingEntity.kt`
+- Startup hardening: `core/RecordingController.kt`, `audio/RecordingService.kt`
+- Release workflow: `.github/workflows/android-apk-release.yml`

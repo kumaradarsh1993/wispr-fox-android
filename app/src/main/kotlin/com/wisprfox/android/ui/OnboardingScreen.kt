@@ -46,6 +46,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -65,8 +66,10 @@ import com.wisprfox.android.BuildConfig
 import com.wisprfox.android.R
 import com.wisprfox.android.WisprFoxApp
 import com.wisprfox.android.delivery.WisprFoxAccessibilityService
+import com.wisprfox.android.provider.ProviderCatalog
 import com.wisprfox.android.settings.FamilyUnlock
 import com.wisprfox.android.settings.SecureKeyStore
+import kotlinx.coroutines.launch
 
 /**
  * Desktop-style multi-step first-run, ported from the sibling's
@@ -91,7 +94,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
     val ctx = LocalContext.current
     val container = remember { WisprFoxApp.container(ctx) }
     var step by rememberSaveable { mutableIntStateOf(0) }
-    var groqSaved by remember { mutableStateOf(container.secrets.has(SecureKeyStore.Key.GroqStt)) }
+    var sttSaved by remember { mutableStateOf(hasAnySttKey(container.secrets)) }
 
     // Permission states are read live; recheck whenever we return from a
     // system settings page (ON_RESUME bumps the tick the readers key off).
@@ -123,14 +126,14 @@ fun OnboardingScreen(onDone: () -> Unit) {
         ) { s ->
             when (s) {
                 0 -> WelcomeStep(
-                    canSkipSetup = groqSaved,
+                    canSkipSetup = sttSaved,
                     onNext = { step = 1 },
                     onSkip = { step = 2 },
                 )
                 1 -> SetupStep(
                     container = container,
-                    groqSaved = groqSaved,
-                    onGroqChange = { groqSaved = it },
+                    groqSaved = sttSaved,
+                    onGroqChange = { sttSaved = it },
                     onBack = { step = 0 },
                     onNext = { step = 2 },
                 )
@@ -294,10 +297,11 @@ private fun SetupStep(
     onNext: () -> Unit,
 ) {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     StepScaffold {
         Text("Get set up", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text(
-            "One key and you're ready. If someone shared a setup code with you, use that — no key needed.",
+            "One speech-to-text key and you're ready. If someone shared a setup code with you, use that - no key needed.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -366,13 +370,13 @@ private fun SetupStep(
             modifier = Modifier.fillMaxWidth(),
         ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Add your Groq key", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text("Add a speech-to-text key", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 var clicks by remember { mutableIntStateOf(0) }
                 Text(
                     if (clicks == 0)
-                        "Free at console.groq.com — sign up (Google or GitHub works), then create a key that starts with gsk_."
+                        "Groq is still the easiest free start, but OpenAI, Deepgram, and ElevenLabs are supported too."
                     else
-                        "✓ Opened Groq. Signed up? Tap again — it should land you on the API keys page. Create a key and paste it below.",
+                        "Opened Groq. Signed up? Tap again to create a key, or paste another provider key below.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -386,9 +390,24 @@ private fun SetupStep(
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text(if (clicks == 0) "Get my Groq key" else "Take me to my keys page") }
 
-                KeyField("Paste your Groq key (gsk_…)", SecureKeyStore.Key.GroqStt, container.secrets) { onGroqChange(it) }
+                KeyField("Paste your Groq key (gsk_…)", SecureKeyStore.Key.GroqStt, container.secrets) {
+                    if (it) scope.launch { container.settingsStore.setSttProvider(ProviderCatalog.STT_GROQ) }
+                    onGroqChange(hasAnySttKey(container.secrets))
+                }
+                KeyField("OpenAI key", SecureKeyStore.Key.OpenAiStt, container.secrets) {
+                    if (it) scope.launch { container.settingsStore.setSttProvider(ProviderCatalog.STT_OPENAI) }
+                    onGroqChange(hasAnySttKey(container.secrets))
+                }
+                KeyField("Deepgram key", SecureKeyStore.Key.DeepgramStt, container.secrets) {
+                    if (it) scope.launch { container.settingsStore.setSttProvider(ProviderCatalog.STT_DEEPGRAM) }
+                    onGroqChange(hasAnySttKey(container.secrets))
+                }
+                KeyField("ElevenLabs key", SecureKeyStore.Key.ElevenLabsStt, container.secrets) {
+                    if (it) scope.launch { container.settingsStore.setSttProvider(ProviderCatalog.STT_ELEVENLABS) }
+                    onGroqChange(hasAnySttKey(container.secrets))
+                }
                 Text(
-                    "Stored only on this phone (Android Keystore) — sent nowhere except Groq.",
+                    "Keys stay encrypted on this phone. Audio is sent only to the provider you select.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -566,3 +585,9 @@ private fun isIgnoringBattery(ctx: Context): Boolean {
     val pm = ctx.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return false
     return pm.isIgnoringBatteryOptimizations(ctx.packageName)
 }
+
+private fun hasAnySttKey(secrets: SecureKeyStore): Boolean =
+    secrets.has(SecureKeyStore.Key.GroqStt) ||
+        secrets.has(SecureKeyStore.Key.OpenAiStt) ||
+        secrets.has(SecureKeyStore.Key.DeepgramStt) ||
+        secrets.has(SecureKeyStore.Key.ElevenLabsStt)

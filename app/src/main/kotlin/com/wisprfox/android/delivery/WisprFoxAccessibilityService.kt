@@ -122,6 +122,10 @@ class WisprFoxAccessibilityService : AccessibilityService() {
         /** Whether the service is currently connected (user enabled it). */
         fun isConnected(): Boolean = instance != null
 
+        /** Package name of the currently focused editable field, when known. */
+        fun currentEditablePackage(): String? =
+            instance?.focusedEditable()?.packageName?.toString()
+
         /**
          * Attempt auto-paste from any context. [clipboardFallbackReady] should
          * be true if the caller has already put [text] on the clipboard so the

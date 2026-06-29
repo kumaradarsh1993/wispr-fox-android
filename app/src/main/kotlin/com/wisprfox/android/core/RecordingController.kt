@@ -1,8 +1,11 @@
 package com.wisprfox.android.core
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import com.wisprfox.android.audio.RecordingService
+import com.wisprfox.android.delivery.WisprFoxAccessibilityService
 import com.wisprfox.android.history.RecordingRepository
 import com.wisprfox.android.provider.DictationMode
 import com.wisprfox.android.settings.SettingsStore
@@ -55,12 +58,27 @@ class RecordingController(
     }
 
     private suspend fun start(modeOverride: DictationMode?) {
+        if (ContextCompat.checkSelfPermission(appContext, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            AppState.update {
+                copy(
+                    pipeline = PipelineState.ERROR,
+                    message = "Microphone permission is off - enable it in Settings.",
+                    messageIsError = true,
+                    activeRecordingId = null,
+                )
+            }
+            return
+        }
+
         val settings = settingsStore.settings.first()
         val mode = modeOverride ?: settings.defaultMode
+        val targetPackage = WisprFoxAccessibilityService.currentEditablePackage()
 
         val dateDir = File(appContext.getExternalFilesDir(null), "audio/${dateStamp()}").apply { mkdirs() }
         val path = File(dateDir, "${UUID.randomUUID()}.wav").absolutePath
-        val id = recordings.newRecording(path, mode)
+        val id = recordings.newRecording(path, mode, targetPackage)
 
         AppState.update {
             copy(
@@ -70,12 +88,25 @@ class RecordingController(
                 elapsedMs = 0,
                 totalBytes = 0,
                 message = null,
+                targetPackage = targetPackage,
             )
         }
-        ContextCompat.startForegroundService(
-            appContext,
-            RecordingService.startIntent(appContext, path, id, mode),
-        )
+        try {
+            ContextCompat.startForegroundService(
+                appContext,
+                RecordingService.startIntent(appContext, path, id, mode),
+            )
+        } catch (e: Exception) {
+            recordings.setError(id, "Could not start recording - open wispr-fox and try again.")
+            AppState.update {
+                copy(
+                    pipeline = PipelineState.ERROR,
+                    activeRecordingId = null,
+                    message = "Could not start recording - open wispr-fox and try again.",
+                    messageIsError = true,
+                )
+            }
+        }
     }
 
     private fun stop() {

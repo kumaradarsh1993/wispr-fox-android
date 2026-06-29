@@ -18,6 +18,7 @@ import com.wisprfox.android.history.AltKind
 import com.wisprfox.android.history.RecordingStatus
 import com.wisprfox.android.provider.CleanupOrchestrator
 import com.wisprfox.android.provider.DictationMode
+import com.wisprfox.android.provider.ProviderCatalog
 import com.wisprfox.android.provider.SttError
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
@@ -51,7 +52,7 @@ class TranscribeWorker(
         }
 
         val transcript = try {
-            val stt = container.providerFactory.stt(settings.sttModel)
+            val stt = container.providerFactory.stt(settings)
             stt.transcribe(rec.audioPath, settings.languageHint).also {
                 recordings.setTranscript(id, it.text, stt.name)
             }
@@ -59,10 +60,10 @@ class TranscribeWorker(
             return fail(id, e.message ?: "API key missing")
         } catch (e: SttError) {
             // Transient (network/timeout/5xx) → retry; permanent → surface.
-            return if (e.isTransient()) retryOrFail(id, e.message ?: "transcription failed")
-            else fail(id, friendlySttError(e))
+            return if (e.isTransient()) retryOrFail(id, friendlySttError(e, settings.sttProvider))
+            else fail(id, friendlySttError(e, settings.sttProvider))
         } catch (e: Exception) {
-            return retryOrFail(id, e.message ?: "transcription failed")
+            return retryOrFail(id, "Transcription failed - check your connection and retry from History.")
         }
 
         // ── LLM cleanup / drafting (skipped for RAW) ─────────────────────────
@@ -83,7 +84,9 @@ class TranscribeWorker(
                 result.text
             } catch (e: MissingKeyException) {
                 // No LLM key — degrade gracefully to the raw transcript.
-                AppState.toast("Using raw transcript — ${e.providerLabel} key missing")
+                AppState.toast("Using raw transcript - ${e.providerLabel} key missing")
+                val altKind = if (rec.mode == DictationMode.REFORMATTED) AltKind.DRAFTED else AltKind.CLEANED
+                recordings.setAlt(id, altKind, transcript.text, settings.llmProvider, false, "clippy_missing_key")
                 transcript.text
             }
         } else {
@@ -93,7 +96,11 @@ class TranscribeWorker(
         // ── Deliver ──────────────────────────────────────────────────────────
         recordings.setStatus(id, RecordingStatus.INJECTING)
         AppState.setPipeline(PipelineState.INJECTING)
-        val channel = container.delivery.deliver(finalText, autoPaste = settings.autoPasteEnabled)
+        val channel = container.delivery.deliver(
+            text = finalText,
+            autoPaste = settings.autoPasteEnabled,
+            expectedPackage = rec.targetPackage,
+        )
         recordings.setStatus(id, RecordingStatus.DONE)
 
         AppState.update {
@@ -102,6 +109,7 @@ class TranscribeWorker(
                 message = if (channel == DeliveryManager.Channel.ACCESSIBILITY) "Pasted" else "Copied — paste anywhere",
                 messageIsError = false,
                 activeRecordingId = null,
+                targetPackage = null,
             )
         }
         scheduleIdleReset()
@@ -132,7 +140,7 @@ class TranscribeWorker(
     private suspend fun fail(id: String, message: String): Result {
         container.recordings.setError(id, message)
         AppState.update {
-            copy(pipeline = PipelineState.ERROR, message = message, messageIsError = true, activeRecordingId = null)
+            copy(pipeline = PipelineState.ERROR, message = message, messageIsError = true, activeRecordingId = null, targetPackage = null)
         }
         scheduleIdleReset()
         return Result.failure()
@@ -144,14 +152,21 @@ class TranscribeWorker(
         else -> false
     }
 
-    private fun friendlySttError(e: SttError): String = when (e) {
-        is SttError.Http -> when (e.status) {
-            401, 403 -> "Groq key rejected — check Settings."
-            413 -> "Recording too large to transcribe."
-            else -> "Transcription failed (HTTP ${e.status})."
+    private fun friendlySttError(e: SttError, provider: String): String {
+        val label = ProviderCatalog.label(provider)
+        return when (e) {
+            is SttError.Http -> when (e.status) {
+                401, 403 -> "$label key rejected - check Settings."
+                413 -> "Recording too large to transcribe."
+                429 -> "$label rate limit - wait a minute and retry from History."
+                in 500..599 -> "$label had a server hiccup - retry from History."
+                else -> "Transcription failed with $label (HTTP ${e.status})."
+            }
+            is SttError.FileTooLarge -> "Recording too large to transcribe."
+            is SttError.Network -> "Transcription failed with $label - check your connection."
+            is SttError.Timeout -> "Transcription took too long with $label - retry from History."
+            else -> "Transcription failed with $label."
         }
-        is SttError.FileTooLarge -> "Recording too large to transcribe."
-        else -> "Transcription failed."
     }
 
     companion object {

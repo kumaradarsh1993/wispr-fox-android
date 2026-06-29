@@ -25,6 +25,7 @@ data class RecordingEntity(
     @ColumnInfo(name = "drafted_text") val draftedText: String? = null,
     @ColumnInfo(name = "stt_provider") val sttProvider: String? = null,
     @ColumnInfo(name = "llm_provider") val llmProvider: String? = null,
+    @ColumnInfo(name = "target_package") val targetPackage: String? = null,
     @ColumnInfo(name = "clippy_used") val clippyUsed: Boolean = false,
     @ColumnInfo(name = "clippy_note") val clippyNote: String? = null,
     @ColumnInfo(name = "retry_count") val retryCount: Int = 0,

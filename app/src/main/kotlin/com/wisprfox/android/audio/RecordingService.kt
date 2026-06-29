@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.wisprfox.android.MainActivity
@@ -37,6 +38,7 @@ class RecordingService : Service() {
     private var recorder: AudioRecorder? = null
     private var outputPath: String? = null
     private var recordingId: String? = null
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -69,24 +71,35 @@ class RecordingService : Service() {
 
         ensureChannel()
         val notification = buildNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
-        } else {
-            startForeground(NOTIF_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+            } else {
+                startForeground(NOTIF_ID, notification)
+            }
+        } catch (e: Exception) {
+            failStartup("Could not start protected recording - open wispr-fox and try again.", e)
+            return
         }
 
         val outFile = File(path).apply { parentFile?.mkdirs() }
         Log.i(TAG, "starting recording → ${outFile.absolutePath}")
 
-        recorder = AudioRecorder(outFile) { bytes, elapsed ->
-            AppState.setMetrics(elapsed, bytes)
-        }.also { it.start() }
+        acquireWakeLock()
+        try {
+            recorder = AudioRecorder(outFile) { bytes, elapsed ->
+                AppState.setMetrics(elapsed, bytes)
+            }.also { it.start() }
+        } catch (e: Exception) {
+            failStartup("Microphone could not start - check permission and try again.", e)
+        }
     }
 
     private fun stopRecording() {
         Log.i(TAG, "stopping recording")
         recorder?.stop()
         recorder = null
+        releaseWakeLock()
         stopForeground(STOP_FOREGROUND_REMOVE)
 
         val path = outputPath
@@ -107,7 +120,7 @@ class RecordingService : Service() {
                 container.recordings.setError(id, "Recording too short")
                 runCatching { file.delete() }
                 AppState.update {
-                    copy(pipeline = PipelineState.IDLE, activeRecordingId = null, message = "Too short — hold a moment longer", messageIsError = true)
+                    copy(pipeline = PipelineState.IDLE, activeRecordingId = null, targetPackage = null, message = "Too short - hold a moment longer", messageIsError = true)
                 }
                 return@runBlocking
             }
@@ -119,7 +132,46 @@ class RecordingService : Service() {
 
     override fun onDestroy() {
         if (recorder?.isRunning() == true) stopRecording()
+        releaseWakeLock()
         super.onDestroy()
+    }
+
+    private fun failStartup(message: String, error: Exception) {
+        Log.e(TAG, message, error)
+        val id = recordingId
+        val path = outputPath
+        outputPath = null
+        recordingId = null
+        recorder = null
+        releaseWakeLock()
+        runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+        if (id != null) {
+            val container = WisprFoxApp.container(applicationContext)
+            runBlocking {
+                container.recordings.setError(id, message)
+            }
+        }
+        path?.let { runCatching { File(it).delete() } }
+        AppState.update {
+            copy(pipeline = PipelineState.ERROR, activeRecordingId = null, targetPackage = null, message = message, messageIsError = true)
+        }
+        stopSelf()
+    }
+
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$packageName:recording").apply {
+            setReferenceCounted(false)
+            acquire(30 * 60 * 1000L)
+        }
+    }
+
+    private fun releaseWakeLock() {
+        runCatching {
+            if (wakeLock?.isHeld == true) wakeLock?.release()
+        }
+        wakeLock = null
     }
 
     private fun ensureChannel() {

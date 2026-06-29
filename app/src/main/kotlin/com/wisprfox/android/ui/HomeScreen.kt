@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -73,6 +75,7 @@ import com.wisprfox.android.delivery.WisprFoxAccessibilityService
 import com.wisprfox.android.history.Recording
 import com.wisprfox.android.overlay.AvatarView
 import com.wisprfox.android.provider.DictationMode
+import com.wisprfox.android.provider.ProviderCatalog
 import com.wisprfox.android.settings.AppSettings
 import com.wisprfox.android.settings.Avatar
 import com.wisprfox.android.settings.SecureKeyStore
@@ -85,7 +88,7 @@ private const val STT_TURBO = "whisper-large-v3-turbo"
 private const val STT_ACCURATE = "whisper-large-v3"
 private val GREEN = Color(0xFF6CB16D)
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun HomeScreen(onOpenHistory: () -> Unit, onOpenSettings: () -> Unit) {
     val ctx = LocalContext.current
@@ -199,9 +202,14 @@ fun HomeScreen(onOpenHistory: () -> Unit, onOpenSettings: () -> Unit) {
                 )
             }
 
-            SectionCard("Speed") {
-                ChipRow(
-                    options = listOf(STT_TURBO to "Fast", STT_ACCURATE to "Accurate"),
+            SectionCard("Speech-to-text") {
+                Text(
+                    "${ProviderCatalog.label(settings.sttProvider)} · ${ProviderCatalog.shortModel(settings.sttModel)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                ModelFlow(
+                    options = ProviderCatalog.sttModelsFor(settings.sttProvider).map { it.id to it.label },
                     selected = settings.sttModel,
                     onSelect = { scope.launch { container.settingsStore.setSttModel(it) } },
                 )
@@ -214,6 +222,11 @@ fun HomeScreen(onOpenHistory: () -> Unit, onOpenSettings: () -> Unit) {
                         selected = settings.llmProvider == AppSettings.PROVIDER_GROQ,
                         onClick = { scope.launch { container.settingsStore.setLlmProvider(AppSettings.PROVIDER_GROQ) } },
                         label = { Text("Llama 70B · Groq") },
+                    )
+                    FilterChip(
+                        selected = settings.llmProvider == AppSettings.PROVIDER_OPENAI,
+                        onClick = { scope.launch { container.settingsStore.setLlmProvider(AppSettings.PROVIDER_OPENAI) } },
+                        label = { Text("OpenAI") },
                     )
                     FilterChip(
                         selected = settings.llmProvider == AppSettings.PROVIDER_GEMINI && geminiReady,
@@ -349,6 +362,19 @@ private fun StatusPill(state: AppState.Snapshot, recording: Boolean) {
 @Composable
 private fun <T> ChipRow(options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        options.forEach { (value, label) ->
+            FilterChip(selected = selected == value, onClick = { onSelect(value) }, label = { Text(label) })
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ModelFlow(options: List<Pair<String, String>>, selected: String, onSelect: (String) -> Unit) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         options.forEach { (value, label) ->
             FilterChip(selected = selected == value, onClick = { onSelect(value) }, label = { Text(label) })
         }

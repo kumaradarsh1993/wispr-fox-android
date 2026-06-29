@@ -25,8 +25,8 @@ android {
         applicationId = "com.wisprfox.android"
         minSdk = 31
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.2.0"
+        versionCode = 12
+        versionName = "1.2.0-codex.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -50,6 +50,9 @@ android {
             )
             // No baked keys in release builds.
             buildConfigField("String", "DEV_GROQ_KEY", "\"\"")
+            buildConfigField("String", "DEV_OPENAI_KEY", "\"\"")
+            buildConfigField("String", "DEV_DEEPGRAM_KEY", "\"\"")
+            buildConfigField("String", "DEV_ELEVENLABS_KEY", "\"\"")
             buildConfigField("String", "DEV_GEMINI_KEY", "\"\"")
         }
         debug {
@@ -57,6 +60,9 @@ android {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
             buildConfigField("String", "DEV_GROQ_KEY", "\"${devKey("groq")}\"")
+            buildConfigField("String", "DEV_OPENAI_KEY", "\"${devKey("openai")}\"")
+            buildConfigField("String", "DEV_DEEPGRAM_KEY", "\"${devKey("deepgram")}\"")
+            buildConfigField("String", "DEV_ELEVENLABS_KEY", "\"${devKey("elevenlabs")}\"")
             buildConfigField("String", "DEV_GEMINI_KEY", "\"${devKey("gemini")}\"")
         }
     }
