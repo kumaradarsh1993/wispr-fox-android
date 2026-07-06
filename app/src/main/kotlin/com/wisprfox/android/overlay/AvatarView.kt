@@ -26,5 +26,11 @@ fun AvatarView(avatar: Avatar, state: PipelineState, modifier: Modifier) {
             modifier = modifier,
         )
         Avatar.CLIPPY -> ClippyAvatar(state, modifier)
+        Avatar.ORU_GUJIA -> Image(
+            painter = painterResource(oruGujiaFor(state)),
+            contentDescription = description,
+            modifier = modifier,
+        )
+        Avatar.SIRI -> SiriOrbAvatar(state, modifier)
     }
 }

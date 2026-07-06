@@ -35,13 +35,22 @@ class RecordingController(
 ) {
     private val appContext = context.applicationContext
 
-    /** Tap handler. Starts if idle; stops+processes if recording; ignores taps mid-pipeline. */
+    /**
+     * Tap handler. Starts if idle; stops+processes if recording; ignores taps
+     * only during a FOREGROUND transcribe/clean/inject.
+     *
+     * RC-1.3: a background WorkManager retry no longer blocks a new dictation —
+     * [TranscribeWorker] frees the live pipeline back to IDLE when it schedules
+     * a retry, so the user lands in the IDLE branch here and can start again
+     * immediately while the previous recording keeps retrying in the background
+     * (its durable Room row still tracks it).
+     */
     fun toggle(modeOverride: DictationMode? = null) {
         scope.launch {
             when (AppState.state.value.pipeline) {
                 PipelineState.RECORDING -> stop()
                 PipelineState.IDLE, PipelineState.DONE, PipelineState.ERROR -> start(modeOverride)
-                else -> { /* busy transcribing/cleaning/injecting — ignore */ }
+                else -> { /* busy in a foreground transcribe/clean/inject — ignore the double-tap */ }
             }
         }
     }

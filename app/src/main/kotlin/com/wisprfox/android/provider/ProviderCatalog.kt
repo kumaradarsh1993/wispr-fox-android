@@ -31,11 +31,15 @@ object ProviderCatalog {
         ProviderOption(LLM_GEMINI, "Gemini", "Google cleanup"),
     )
 
+    // Model lists verified live against provider docs on 2026-07-07 (see
+    // docs/AUDIT_2026-07-06_FABLE.md Task 1). The first entry in each list is
+    // the provider default; sanitize*Model() coerces removed/stale ids to it,
+    // so old saved prefs self-heal after a model is retired.
     val sttModels: Map<String, List<ModelOption>> = mapOf(
         STT_GROQ to listOf(
             ModelOption("whisper-large-v3-turbo", "Whisper Turbo", "Fast default"),
             ModelOption("whisper-large-v3", "Whisper Large v3", "Higher accuracy"),
-            ModelOption("distil-whisper-large-v3-en", "Distil Whisper", "English-only fast path"),
+            // distil-whisper-large-v3-en removed 2026-07-07 — Groq no longer lists it.
         ),
         STT_OPENAI to listOf(
             ModelOption("gpt-4o-transcribe", "GPT-4o Transcribe", "Best OpenAI STT quality"),
@@ -47,8 +51,8 @@ object ProviderCatalog {
             ModelOption("nova-2", "Nova-2", "Stable fallback"),
         ),
         STT_ELEVENLABS to listOf(
+            // scribe_v1 removed — ElevenLabs deletes it 2026-07-09. scribe_v2 only.
             ModelOption("scribe_v2", "Scribe v2", "Recommended ElevenLabs model"),
-            ModelOption("scribe_v1", "Scribe v1", "Legacy fallback"),
         ),
     )
 
@@ -56,7 +60,8 @@ object ProviderCatalog {
         LLM_GROQ to listOf(
             ModelOption("llama-3.3-70b-versatile", "Llama 3.3 70B", "Balanced default"),
             ModelOption("llama-3.1-8b-instant", "Llama 3.1 8B", "Fast cleanup"),
-            ModelOption("llama-4-maverick", "Llama 4 Maverick", "Higher-quality Groq option"),
+            // Replaced invalid "llama-4-maverick" with the real Groq id 2026-07-07.
+            ModelOption("meta-llama/llama-4-scout-17b-16e-instruct", "Llama 4 Scout", "Preview, higher quality"),
         ),
         LLM_OPENAI to listOf(
             ModelOption("gpt-5.4-mini", "GPT-5.4 mini", "Fast OpenAI cleanup"),
@@ -64,9 +69,11 @@ object ProviderCatalog {
             ModelOption("gpt-5.5", "GPT-5.5", "Frontier cleanup"),
         ),
         LLM_GEMINI to listOf(
-            ModelOption("gemini-2.5-flash", "Gemini 2.5 Flash", "Fast Gemini default"),
+            ModelOption("gemini-3.5-flash", "Gemini 3.5 Flash", "New default, stable"),
+            ModelOption("gemini-2.5-flash", "Gemini 2.5 Flash", "Fast Gemini"),
             ModelOption("gemini-2.5-flash-lite", "Gemini Flash-Lite", "Lowest latency"),
             ModelOption("gemini-2.5-pro", "Gemini 2.5 Pro", "Paid-tier quality"),
+            ModelOption("gemini-3.1-pro-preview", "Gemini 3.1 Pro", "Preview"),
         ),
     )
 
@@ -102,20 +109,21 @@ object ProviderCatalog {
     fun shortModel(model: String): String = when {
         model.startsWith("whisper-large-v3-turbo") -> "Whisper Turbo"
         model.startsWith("whisper-large-v3") -> "Whisper v3"
-        model.startsWith("distil-whisper") -> "Distil Whisper"
         model.startsWith("gpt-4o-mini-transcribe") -> "4o mini STT"
         model.startsWith("gpt-4o-transcribe") -> "4o STT"
         model.startsWith("whisper-1") -> "Whisper API"
         model.startsWith("nova-3") -> "Nova-3"
         model.startsWith("nova-2") -> "Nova-2"
         model.startsWith("scribe_v2") -> "Scribe v2"
-        model.startsWith("scribe_v1") -> "Scribe v1"
         model.startsWith("llama-3.3-70b") -> "Llama 70B"
         model.startsWith("llama-3.1-8b") -> "Llama 8B"
-        model.startsWith("llama-4") -> "Llama 4"
+        // Groq's real Llama 4 id is "meta-llama/llama-4-scout-17b-16e-instruct".
+        model.contains("llama-4-scout") || model.startsWith("llama-4") -> "Llama 4 Scout"
         model.startsWith("gpt-5.4-mini") -> "GPT-5.4 mini"
         model.startsWith("gpt-5.4") -> "GPT-5.4"
         model.startsWith("gpt-5.5") -> "GPT-5.5"
+        model.startsWith("gemini-3.5-flash") -> "Gemini 3.5 Flash"
+        model.startsWith("gemini-3.1-pro") -> "Gemini 3.1 Pro"
         model.startsWith("gemini-2.5-flash-lite") -> "Gemini Flash-Lite"
         model.startsWith("gemini-2.5-flash") -> "Gemini Flash"
         model.startsWith("gemini-2.5-pro") -> "Gemini Pro"

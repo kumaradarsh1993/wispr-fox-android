@@ -80,9 +80,16 @@ fun AvatarOverlay(
     onDrag: (dx: Float, dy: Float) -> Unit,
     onDragEnd: () -> Unit,
     onOpenApp: () -> Unit,
+    /** S/M/L overlay-size multiplier (P-3). 1.0 = the classic footprint. */
+    scale: Float = 1f,
 ) {
     val haptics = LocalHapticFeedback.current
     var menuOpen by remember { mutableStateOf(false) }
+
+    // Apply the S/M/L preset to the avatar footprint (the bubble + menu keep
+    // their own sizing so small avatars still get readable status text).
+    val foxSize = FOX_SIZE * scale
+    val foxImg = FOX_IMG * scale
 
     var showBubble by remember { mutableStateOf(false) }
     LaunchedEffect(snapshot.pipeline, snapshot.message) {
@@ -165,7 +172,7 @@ fun AvatarOverlay(
         // The avatar.
         Box(
             modifier = Modifier
-                .size(FOX_SIZE)
+                .size(foxSize)
                 .scale(breathe)
                 .semantics {
                     role = Role.Button
@@ -192,7 +199,7 @@ fun AvatarOverlay(
                 },
             contentAlignment = Alignment.Center,
         ) {
-            AvatarView(avatar = avatar, state = snapshot.pipeline, modifier = Modifier.size(FOX_IMG))
+            AvatarView(avatar = avatar, state = snapshot.pipeline, modifier = Modifier.size(foxImg))
         }
     }
 }

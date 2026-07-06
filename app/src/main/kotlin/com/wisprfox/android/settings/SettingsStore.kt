@@ -35,6 +35,8 @@ data class AppSettings(
     val overlayBubbleEnabled: Boolean = true,
     val hapticsEnabled: Boolean = true,
     val avatar: Avatar = Avatar.FOX,
+    /** Floating-avatar size preset (S/M/L). Applied to the overlay footprint. */
+    val avatarScale: AvatarScale = AvatarScale.MEDIUM,
     /** null = let Whisper auto-detect (the locked English↔Hindi decision). */
     val languageHint: String? = null,
 ) {
@@ -70,6 +72,7 @@ class SettingsStore(private val context: Context) {
         val overlayBubble = booleanPreferencesKey("overlay_bubble")
         val haptics = booleanPreferencesKey("haptics")
         val avatar = stringPreferencesKey("avatar")
+        val avatarScale = stringPreferencesKey("avatar_scale")
         val languageHint = stringPreferencesKey("language_hint")
     }
 
@@ -94,6 +97,7 @@ class SettingsStore(private val context: Context) {
             overlayBubbleEnabled = this[Keys.overlayBubble] ?: defaults.overlayBubbleEnabled,
             hapticsEnabled = this[Keys.haptics] ?: defaults.hapticsEnabled,
             avatar = this[Keys.avatar]?.let { runCatching { Avatar.valueOf(it) }.getOrNull() } ?: defaults.avatar,
+            avatarScale = this[Keys.avatarScale]?.let { runCatching { AvatarScale.valueOf(it) }.getOrNull() } ?: defaults.avatarScale,
             languageHint = this[Keys.languageHint]?.takeIf { it.isNotBlank() } ?: defaults.languageHint,
         )
     }
@@ -117,6 +121,7 @@ class SettingsStore(private val context: Context) {
     suspend fun setOverlayBubble(v: Boolean) = edit { it[Keys.overlayBubble] = v }
     suspend fun setHaptics(v: Boolean) = edit { it[Keys.haptics] = v }
     suspend fun setAvatar(v: Avatar) = edit { it[Keys.avatar] = v.name }
+    suspend fun setAvatarScale(v: AvatarScale) = edit { it[Keys.avatarScale] = v.name }
 
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
         context.dataStore.edit(block)

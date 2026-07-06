@@ -22,6 +22,23 @@ fun avatarFor(state: PipelineState): Int = when (state) {
 }
 
 /**
+ * Oru & Gujia raster pack (P-3) — same 8-state assets as the desktop sibling,
+ * mapped per the manifest → PipelineState table in the audit:
+ *   idle→IDLE, listening→RECORDING, thinking→TRANSCRIBING, writing→CLEANING,
+ *   pasting→INJECTING, excited→DONE, error→ERROR. (sleeping is unused for now.)
+ */
+@DrawableRes
+fun oruGujiaFor(state: PipelineState): Int = when (state) {
+    PipelineState.IDLE -> R.drawable.oru_gujia_idle
+    PipelineState.RECORDING -> R.drawable.oru_gujia_listening
+    PipelineState.TRANSCRIBING -> R.drawable.oru_gujia_thinking
+    PipelineState.CLEANING -> R.drawable.oru_gujia_writing
+    PipelineState.INJECTING -> R.drawable.oru_gujia_pasting
+    PipelineState.DONE -> R.drawable.oru_gujia_excited
+    PipelineState.ERROR -> R.drawable.oru_gujia_error
+}
+
+/**
  * Short status label for non-recording stages. The RECORDING bubble is handled
  * in [AvatarOverlay] with a live ticker + cheeky commentary, so it's null here.
  */

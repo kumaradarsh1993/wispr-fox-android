@@ -152,6 +152,18 @@ fun HomeScreen(onOpenHistory: () -> Unit, onOpenSettings: () -> Unit) {
                 SetupBanner(missing.size) { onOpenSettings() }
             }
 
+            // Accessibility-off explainer (Task 5 / RC-1.1). Agent A changed the
+            // a11y-off fallback: the floating fox now stays HIDDEN (it used to be
+            // pinned always-visible) and words can't auto-land in the box. Tell
+            // the user why, with a one-tap deep-link to enable it. Read live so
+            // the banner clears the moment they return from the system page.
+            val a11yOff = remember(permTick) { !WisprFoxAccessibilityService.isConnected() }
+            if (a11yOff) {
+                AccessibilityBanner(
+                    onEnable = { ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
+                )
+            }
+
             // Hero: status pill, tappable avatar, voice prompt.
             Spacer(Modifier.height(2.dp))
             StatusPill(state, recording)
@@ -168,20 +180,27 @@ fun HomeScreen(onOpenHistory: () -> Unit, onOpenSettings: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            // Avatar picker + big mic.
+            // Avatar picker + big mic. Four skins now (P-3): fox, black clippy,
+            // the Oru & Gujia cats, and the Siri-style orb — each with a mini
+            // preview. Thumbnail is used for the cat pack (cheap raster preview).
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     AvatarChip(
                         selected = settings.avatar == Avatar.FOX,
                         onClick = { scope.launch { container.settingsStore.setAvatar(Avatar.FOX) } },
-                    ) { AvatarView(Avatar.FOX, PipelineState.IDLE, Modifier.size(40.dp)) }
+                    ) { AvatarView(Avatar.FOX, PipelineState.IDLE, Modifier.size(38.dp)) }
                     AvatarChip(
                         selected = settings.avatar == Avatar.CLIPPY,
                         onClick = { scope.launch { container.settingsStore.setAvatar(Avatar.CLIPPY) } },
-                    ) { AvatarView(Avatar.CLIPPY, PipelineState.IDLE, Modifier.size(40.dp)) }
-                    AvatarChip(selected = false, enabled = false, onClick = {}) {
-                        Text("soon", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                    ) { AvatarView(Avatar.CLIPPY, PipelineState.IDLE, Modifier.size(38.dp)) }
+                    AvatarChip(
+                        selected = settings.avatar == Avatar.ORU_GUJIA,
+                        onClick = { scope.launch { container.settingsStore.setAvatar(Avatar.ORU_GUJIA) } },
+                    ) { Image(painterResource(R.drawable.oru_gujia_thumbnail), null, Modifier.size(38.dp)) }
+                    AvatarChip(
+                        selected = settings.avatar == Avatar.SIRI,
+                        onClick = { scope.launch { container.settingsStore.setAvatar(Avatar.SIRI) } },
+                    ) { AvatarView(Avatar.SIRI, PipelineState.IDLE, Modifier.size(38.dp)) }
                 }
                 Spacer(Modifier.weight(1f))
                 FilledIconButton(
@@ -244,6 +263,15 @@ fun HomeScreen(onOpenHistory: () -> Unit, onOpenSettings: () -> Unit) {
                 }
             }
 
+            // Usage strip (P-2). Today's Speech + Cleanup for the active
+            // provider/model, coloured ok/warn/danger, bars for groq/deepgram.
+            val usage = rememberUsageSnapshot(settings)
+            if (usage != null) {
+                SectionCard("Usage today") {
+                    UsageStrip(usage)
+                }
+            }
+
             // Recents preview (kept on the main screen so it's never more than
             // a glance away — the bottom-nav History tab opens the full list).
             RecentsCard(recordings = recordings, onOpenAll = onOpenHistory)
@@ -284,6 +312,44 @@ private fun SetupBanner(missingCount: Int, onClick: () -> Unit) {
                 Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+        }
+    }
+}
+
+/* ── Accessibility-off explainer ─────────────────────────────────────────── */
+
+@Composable
+private fun AccessibilityBanner(onEnable: () -> Unit) {
+    Card(
+        Modifier.fillMaxWidth().clickable(onClick = onEnable),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(Icons.Filled.Mic, contentDescription = null, tint = MaterialTheme.colorScheme.onTertiaryContainer)
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Turn on accessibility",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+                Text(
+                    "Until it's on, the floating fox stays hidden and your words " +
+                        "can't land in the box automatically — they're copied so you " +
+                        "can paste. Tap to enable.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+            }
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onTertiaryContainer,
             )
         }
     }

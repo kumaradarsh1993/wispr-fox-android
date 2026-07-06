@@ -1,8 +1,8 @@
 # Base prompt — read this FIRST
 
-> ## 🟢 CURRENT STATE — 2026-06-06
+> ## 🟢 CURRENT STATE — 2026-07-07
 >
-> **Codex preview `v1.2.0-codex.2` is the active working checkpoint.** Last Claude stable remains `v1.1.0` (commit `4cf396b`).
+> **Fable nightly `v1.3.0-nightly.1` is the active working checkpoint** (core-reliability fixes + desktop parity ports; audit in `docs/AUDIT_2026-07-06_FABLE.md`). Last stable remains `v1.1.0` (commit `4cf396b`).
 >
 > Also read [CODEX_HANDOVER_2026-06-29.md](./CODEX_HANDOVER_2026-06-29.md) after [HANDOVER.md](./HANDOVER.md).
 >

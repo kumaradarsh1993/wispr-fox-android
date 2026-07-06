@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.IBinder
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
@@ -24,13 +25,15 @@ import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.wisprfox.android.WisprFoxApp
 import com.wisprfox.android.core.AppState
-import com.wisprfox.android.core.PipelineState
 import com.wisprfox.android.delivery.WisprFoxAccessibilityService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -68,19 +71,34 @@ class OverlayService : Service() {
      * The fox is NOT permanently on screen. It appears when the keyboard is up
      * (an editable field is focused) and hides when the keyboard is dismissed —
      * but always stays visible while a recording/transcription is in flight so
-     * you can scroll or move it mid-dictation. When the AccessibilityService is
-     * off we can't detect the keyboard, so we fall back to always-visible.
+     * you can scroll or move it mid-dictation.
+     *
+     * RC-1.1: when the AccessibilityService is OFF we can't detect the keyboard,
+     * so instead of pinning the fox always-visible (the "fox sticks around with
+     * no text box in sight" bug), we show it only briefly after the user
+     * interacts with it. The decision itself lives in the pure
+     * [OverlayVisibility] so it's unit-tested. A slow ticker re-evaluates so the
+     * grace window can expire even when no AppState change arrives.
      */
     private fun observeVisibility() {
+        // Emit periodically so the interaction grace window can lapse without a
+        // fresh AppState emission to trigger recomputation.
+        val ticker = flow {
+            while (true) {
+                emit(Unit)
+                delay(TICK_MS)
+            }
+        }
         serviceScope.launch {
-            AppState.state
+            combine(AppState.state, ticker) { snap, _ -> snap }
                 .map { snap ->
-                    val busy = snap.pipeline == PipelineState.RECORDING ||
-                        snap.pipeline == PipelineState.TRANSCRIBING ||
-                        snap.pipeline == PipelineState.CLEANING ||
-                        snap.pipeline == PipelineState.INJECTING
-                    val a11yOn = WisprFoxAccessibilityService.isConnected()
-                    busy || (if (a11yOn) snap.keyboardVisible else true)
+                    OverlayVisibility.shouldShow(
+                        pipeline = snap.pipeline,
+                        a11yConnected = WisprFoxAccessibilityService.isConnected(),
+                        keyboardVisible = snap.keyboardVisible,
+                        nowMs = SystemClock.elapsedRealtime(),
+                        lastInteractionMs = snap.lastInteractionMs,
+                    )
                 }
                 .distinctUntilChanged()
                 .collect { show ->
@@ -131,13 +149,26 @@ class OverlayService : Service() {
                 val avatar by container.settingsStore.settings
                     .map { it.avatar }
                     .collectAsState(initial = com.wisprfox.android.settings.Avatar.FOX)
+                // P-3: S/M/L overlay-size preset, collected from the same flow.
+                val avatarScale by container.settingsStore.settings
+                    .map { it.avatarScale }
+                    .collectAsState(initial = com.wisprfox.android.settings.AvatarScale.MEDIUM)
                 com.wisprfox.android.ui.WisprFoxTheme {
                 AvatarOverlay(
                     snapshot = state,
                     avatar = avatar,
-                    onTap = { container.controller.toggle() },
-                    onPickMode = { mode -> container.controller.startMode(mode) },
+                    onTap = {
+                        AppState.markInteraction(SystemClock.elapsedRealtime())
+                        container.controller.toggle()
+                    },
+                    onPickMode = { mode ->
+                        AppState.markInteraction(SystemClock.elapsedRealtime())
+                        container.controller.startMode(mode)
+                    },
                     onDrag = { dx, dy ->
+                        // Refresh the grace window so the fox doesn't vanish
+                        // mid-drag when a11y is off (RC-1.1).
+                        AppState.markInteraction(SystemClock.elapsedRealtime())
                         params.x = (params.x + dx.toInt()).coerceAtLeast(0)
                         // BOTTOM gravity: dragging down lowers the window, i.e.
                         // reduces its distance-from-bottom.
@@ -153,17 +184,23 @@ class OverlayService : Service() {
                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         )
                     },
+                    scale = avatarScale.multiplier,
                 )
                 }
             }
         }
 
-        // Start hidden when accessibility can drive visibility and the keyboard
-        // isn't up — the collector flips it on as soon as a field is focused.
-        view.visibility = if (WisprFoxAccessibilityService.isConnected() &&
-            AppState.state.value.pipeline == PipelineState.IDLE &&
-            !AppState.state.value.keyboardVisible
-        ) View.GONE else View.VISIBLE
+        // Seed initial visibility from the same pure rule the collector uses, so
+        // the fox doesn't flash on before the first emission decides otherwise.
+        val snap = AppState.state.value
+        val initiallyVisible = OverlayVisibility.shouldShow(
+            pipeline = snap.pipeline,
+            a11yConnected = WisprFoxAccessibilityService.isConnected(),
+            keyboardVisible = snap.keyboardVisible,
+            nowMs = SystemClock.elapsedRealtime(),
+            lastInteractionMs = snap.lastInteractionMs,
+        )
+        view.visibility = if (initiallyVisible) View.VISIBLE else View.GONE
 
         viewOwner.onCreate()
         composeView = view
@@ -178,6 +215,15 @@ class OverlayService : Service() {
         composeView = null
         owner = null
         super.onDestroy()
+    }
+
+    private companion object {
+        /**
+         * Re-evaluate visibility this often so the grace window can expire when
+         * a11y is off without a fresh AppState emission. 1s is imperceptible and
+         * negligible for battery (the overlay process is already resident).
+         */
+        const val TICK_MS = 1_000L
     }
 }
 

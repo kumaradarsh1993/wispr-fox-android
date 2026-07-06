@@ -37,10 +37,33 @@ object AppState {
         /**
          * True when the soft keyboard / an editable field is in focus, as
          * reported by the AccessibilityService. Drives the avatar's
-         * appear-with-keyboard / hide-on-dismiss behaviour. (When accessibility
-         * is OFF we can't detect this, so the overlay falls back to always-on.)
+         * appear-with-keyboard / hide-on-dismiss behaviour. Only meaningful when
+         * [a11yConnected] is true — when accessibility is OFF we can't detect
+         * the keyboard, so the overlay uses an interaction grace window instead
+         * of pinning the fox always-visible (RC-1.1).
          */
         val keyboardVisible: Boolean = false,
+        /**
+         * True while the AccessibilityService is connected. Exposed so the
+         * overlay and in-app screens can decide behaviour (keyboard-driven vs
+         * grace-window) and surface a passive "enable accessibility" nudge
+         * without hard-coupling to the service singleton.
+         */
+        val a11yConnected: Boolean = false,
+        /**
+         * Monotonic (SystemClock.elapsedRealtime) timestamp of the last user
+         * interaction with the floating fox. Drives the short grace window that
+         * keeps the fox on screen just after a tap/drag when a11y is OFF, so it
+         * doesn't vanish instantly yet doesn't linger forever (RC-1.1).
+         */
+        val lastInteractionMs: Long = 0L,
+        /**
+         * True while a MainActivity is in the foreground. Lets delivery decide
+         * whether a clipboard-only outcome needs a notification (RC-2.4): if the
+         * app is already on screen, the in-app UI shows the result and a
+         * notification would be noise.
+         */
+        val appForeground: Boolean = false,
     )
 
     private val _state = MutableStateFlow(Snapshot())
@@ -56,6 +79,13 @@ object AppState {
         update { copy(elapsedMs = elapsedMs, totalBytes = totalBytes) }
 
     fun setKeyboardVisible(visible: Boolean) = update { copy(keyboardVisible = visible) }
+
+    fun setA11yConnected(connected: Boolean) = update { copy(a11yConnected = connected) }
+
+    fun setAppForeground(foreground: Boolean) = update { copy(appForeground = foreground) }
+
+    /** Record a user tap/drag on the fox (monotonic ms) for the grace window. */
+    fun markInteraction(nowMs: Long) = update { copy(lastInteractionMs = nowMs) }
 
     fun toast(text: String, isError: Boolean = false) =
         update { copy(message = text, messageIsError = isError) }

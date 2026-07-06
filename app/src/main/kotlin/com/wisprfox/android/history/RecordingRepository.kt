@@ -58,8 +58,31 @@ private fun RecordingEntity.toDomain() = Recording(
 /**
  * CRUD + retention over the recordings table. The audio WAV and its DB row are
  * deleted together (matching desktop locked decision #7).
+ *
+ * P-2 usage tracking is hooked HERE (not in the worker — that's Agent A's
+ * scope) via [usage] + [activeModels]. The worker already calls
+ * [setTranscript] on STT success and [setAlt] on LLM success; those methods now
+ * also tally a usage bucket. Both hooks are optional (nullable) so the
+ * repository still constructs in contexts that don't wire usage.
  */
-class RecordingRepository(private val dao: RecordingDao) {
+class RecordingRepository(
+    private val dao: RecordingDao,
+    private val usage: UsageRepository? = null,
+    /**
+     * Supplies the active (sttProvider, sttModel, llmProvider, llmModel) for
+     * tallying. The worker doesn't pass the model to setTranscript/setAlt (and
+     * we can't edit the worker), so we read it from settings at tally time.
+     * Returns null when settings aren't available (usage tally is skipped).
+     */
+    private val activeModels: (suspend () -> ActiveModels?)? = null,
+) {
+
+    data class ActiveModels(
+        val sttProvider: String,
+        val sttModel: String,
+        val llmProvider: String,
+        val llmModel: String,
+    )
 
     suspend fun newRecording(audioPath: String, mode: DictationMode, targetPackage: String?): String {
         val id = UUID.randomUUID().toString()
@@ -84,8 +107,10 @@ class RecordingRepository(private val dao: RecordingDao) {
     suspend fun setStatus(id: String, status: RecordingStatus) = dao.setStatus(id, status.raw)
     suspend fun setError(id: String, error: String) = dao.setError(id, error)
     suspend fun setDuration(id: String, durationMs: Long) = dao.setDuration(id, durationMs)
-    suspend fun setTranscript(id: String, transcript: String, provider: String) =
+    suspend fun setTranscript(id: String, transcript: String, provider: String) {
         dao.setTranscript(id, transcript, provider)
+        tallyStt(id, provider)
+    }
     suspend fun bumpRetry(id: String) = dao.bumpRetry(id)
 
     suspend fun setAlt(
@@ -95,9 +120,48 @@ class RecordingRepository(private val dao: RecordingDao) {
         provider: String?,
         used: Boolean,
         note: String?,
-    ) = when (kind) {
-        AltKind.CLEANED -> dao.setCleaned(id, text, provider, used, note)
-        AltKind.DRAFTED -> dao.setDrafted(id, text, provider, used, note)
+    ) {
+        when (kind) {
+            AltKind.CLEANED -> dao.setCleaned(id, text, provider, used, note)
+            AltKind.DRAFTED -> dao.setDrafted(id, text, provider, used, note)
+        }
+        // Only a real LLM call counts; a graceful degrade to raw (missing key /
+        // provider down) sets used=false and must NOT inflate the usage meter.
+        if (used) tallyLlm(provider)
+    }
+
+    /**
+     * P-2: tally an STT bucket for a successful transcription. Audio seconds
+     * come from the row's stored duration (the worker already set it before
+     * enqueuing). The model isn't passed to setTranscript (we can't touch the
+     * worker), so we read the active STT model from settings; the provider from
+     * the tally must match settings for the model to be meaningful — if the user
+     * switched providers mid-flight we still record under the passed provider so
+     * the count is never lost.
+     */
+    private suspend fun tallyStt(id: String, provider: String) {
+        val usage = usage ?: return
+        val models = runCatching { activeModels?.invoke() }.getOrNull() ?: return
+        val durationMs = runCatching { dao.getById(id)?.durationMs ?: 0L }.getOrDefault(0L)
+        val audioSeconds = durationMs / 1000.0
+        val model = if (provider == models.sttProvider) models.sttModel else ""
+        runCatching { usage.recordStt(provider, model, audioSeconds, System.currentTimeMillis()) }
+    }
+
+    /**
+     * P-2: tally an LLM bucket for a successful cleanup/draft. TODO(token
+     * plumbing): the LlmProvider.complete() contract returns only text, so we
+     * can't record input/output tokens without touching the provider clients
+     * AND the worker's clean() call — both out of scope for this batch. Calls
+     * are tallied now (matching the desktop call-count fallback); token columns
+     * stay 0 and can be populated later with no migration.
+     */
+    private suspend fun tallyLlm(provider: String?) {
+        val usage = usage ?: return
+        val prov = provider ?: return
+        val models = runCatching { activeModels?.invoke() }.getOrNull() ?: return
+        val model = if (prov == models.llmProvider) models.llmModel else ""
+        runCatching { usage.recordLlm(prov, model, inTok = 0, outTok = 0, totTok = 0, nowMillis = System.currentTimeMillis()) }
     }
 
     suspend fun delete(id: String) {

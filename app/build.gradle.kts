@@ -25,8 +25,8 @@ android {
         applicationId = "com.wisprfox.android"
         minSdk = 31
         targetSdk = 35
-        versionCode = 12
-        versionName = "1.2.0-codex.2"
+        versionCode = 13
+        versionName = "1.3.0-nightly.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

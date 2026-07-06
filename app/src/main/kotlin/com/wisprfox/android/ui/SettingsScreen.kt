@@ -3,7 +3,12 @@ package com.wisprfox.android.ui
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -11,7 +16,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -38,13 +45,18 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.wisprfox.android.WisprFoxApp
+import com.wisprfox.android.core.PipelineState
+import com.wisprfox.android.overlay.AvatarView
 import com.wisprfox.android.provider.DictationMode
 import com.wisprfox.android.provider.ProviderCatalog
 import com.wisprfox.android.settings.AppSettings
+import com.wisprfox.android.settings.Avatar
+import com.wisprfox.android.settings.AvatarScale
 import com.wisprfox.android.settings.SecureKeyStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -117,6 +129,19 @@ fun SettingsScreen(onBack: () -> Unit, onReplayOnboarding: () -> Unit = {}) {
             KeyField("Gemini cleanup key", SecureKeyStore.Key.GeminiLlm, container.secrets)
 
             HorizontalDivider()
+            SectionTitle("Usage today")
+            Text(
+                "Free-tier meters for the provider you're using. Groq and Deepgram show a bar; other providers show the raw count.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            val usage = rememberUsageSnapshot(settings)
+            if (usage != null) {
+                UsageMeterRow("Speech-to-text", usage.stt)
+                UsageMeterRow("Cleanup", usage.llm)
+                Text(usage.resetLabel, style = MaterialTheme.typography.labelSmall)
+            }
+
+            HorizontalDivider()
             SectionTitle("Default tap mode")
             Text("What a single tap on the fox does. Long-press always offers all three.", style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -132,6 +157,24 @@ fun SettingsScreen(onBack: () -> Unit, onReplayOnboarding: () -> Unit = {}) {
             }
             ToggleRow("Show floating fox avatar", settings.overlayBubbleEnabled) {
                 scope.launch { container.settingsStore.setOverlayBubble(it) }
+            }
+
+            // Avatar picker (P-3): each option shows a mini preview.
+            Text("Avatar", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            AvatarPickerRow(
+                selected = settings.avatar,
+                onSelect = { scope.launch { container.settingsStore.setAvatar(it) } },
+            )
+            // Size preset (S/M/L) for the floating avatar.
+            Text("Avatar size", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AvatarScale.entries.forEach { s ->
+                    FilterChip(
+                        selected = settings.avatarScale == s,
+                        onClick = { scope.launch { container.settingsStore.setAvatarScale(s) } },
+                        label = { Text(s.label) },
+                    )
+                }
             }
             ToggleRow("Haptics on long-press", settings.hapticsEnabled) {
                 scope.launch { container.settingsStore.setHaptics(it) }
@@ -177,6 +220,48 @@ fun SettingsScreen(onBack: () -> Unit, onReplayOnboarding: () -> Unit = {}) {
 @Composable
 private fun SectionTitle(text: String) =
     Text(text, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+
+/**
+ * Avatar picker (P-3): fox, black clippy, the Oru & Gujia cats (raster
+ * thumbnail), and the Siri-style orb (mini live orb). A selected chip gets a
+ * primary-coloured border.
+ */
+@Composable
+private fun AvatarPickerRow(selected: Avatar, onSelect: (Avatar) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        AvatarPickerChip(Avatar.FOX, selected, onSelect) {
+            AvatarView(Avatar.FOX, PipelineState.IDLE, Modifier.size(40.dp))
+        }
+        AvatarPickerChip(Avatar.CLIPPY, selected, onSelect) {
+            AvatarView(Avatar.CLIPPY, PipelineState.IDLE, Modifier.size(40.dp))
+        }
+        AvatarPickerChip(Avatar.ORU_GUJIA, selected, onSelect) {
+            Image(painterResource(com.wisprfox.android.R.drawable.oru_gujia_thumbnail), null, Modifier.size(40.dp))
+        }
+        AvatarPickerChip(Avatar.SIRI, selected, onSelect) {
+            AvatarView(Avatar.SIRI, PipelineState.IDLE, Modifier.size(40.dp))
+        }
+    }
+}
+
+@Composable
+private fun AvatarPickerChip(
+    avatar: Avatar,
+    selected: Avatar,
+    onSelect: (Avatar) -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val isSel = selected == avatar
+    val border = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+    Box(
+        modifier = Modifier
+            .size(56.dp)
+            .border(2.dp, border, RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp))
+            .clickable { onSelect(avatar) },
+        contentAlignment = androidx.compose.ui.Alignment.Center,
+    ) { content() }
+}
 
 @Composable
 private fun ModeOption(label: String, mode: DictationMode, current: DictationMode, onSelect: (DictationMode) -> Unit) {

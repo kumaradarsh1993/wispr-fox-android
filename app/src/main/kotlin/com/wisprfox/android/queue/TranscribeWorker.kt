@@ -47,7 +47,12 @@ class TranscribeWorker(
 
         // ── STT ────────────────────────────────────────────────────────────
         recordings.setStatus(id, RecordingStatus.TRANSCRIBING)
-        if (AppState.state.value.activeRecordingId == id || AppState.state.value.pipeline != PipelineState.IDLE) {
+        // RC-1.3: only drive the live avatar if THIS recording owns the live
+        // state. On a background retry we've freed the fox to IDLE (and the user
+        // may have started a fresh dictation), so we must NOT flip their new
+        // recording's avatar back to TRANSCRIBING. The durable Room status above
+        // is the source of truth for History regardless.
+        if (AppState.state.value.activeRecordingId == id) {
             AppState.setPipeline(PipelineState.TRANSCRIBING)
         }
 
@@ -69,7 +74,9 @@ class TranscribeWorker(
         // ── LLM cleanup / drafting (skipped for RAW) ─────────────────────────
         val finalText: String = if (rec.mode.usesLlm) {
             recordings.setStatus(id, RecordingStatus.CLEANING)
-            AppState.setPipeline(PipelineState.CLEANING)
+            if (AppState.state.value.activeRecordingId == id) {
+                AppState.setPipeline(PipelineState.CLEANING)
+            }
             try {
                 val llm = container.providerFactory.llm(settings)
                 val result = CleanupOrchestrator().clean(
@@ -94,25 +101,40 @@ class TranscribeWorker(
         }
 
         // ── Deliver ──────────────────────────────────────────────────────────
-        recordings.setStatus(id, RecordingStatus.INJECTING)
-        AppState.setPipeline(PipelineState.INJECTING)
+        // RC-1.3: if this delivery is the tail of a BACKGROUND retry (the fox
+        // was already freed to IDLE on the first retry, and the user has moved
+        // on — possibly into a different app or mid-typing), a surprise
+        // auto-paste would be jarring and land in the wrong place. So a retried
+        // delivery is clipboard-only + a "Transcript ready" notification
+        // (posted by DeliveryManager when the app isn't foreground).
+        val isBackgroundRetry = runAttemptCount > 0
+        // Only drive the live pipeline if THIS recording still owns it. If the
+        // user started a fresh dictation while we retried, don't hijack the
+        // avatar away from their new recording.
+        val ownsLiveState = AppState.state.value.activeRecordingId == id
+        if (ownsLiveState && !isBackgroundRetry) {
+            recordings.setStatus(id, RecordingStatus.INJECTING)
+            AppState.setPipeline(PipelineState.INJECTING)
+        }
         val channel = container.delivery.deliver(
             text = finalText,
-            autoPaste = settings.autoPasteEnabled,
+            autoPaste = settings.autoPasteEnabled && !isBackgroundRetry,
             expectedPackage = rec.targetPackage,
         )
         recordings.setStatus(id, RecordingStatus.DONE)
 
-        AppState.update {
-            copy(
-                pipeline = PipelineState.DONE,
-                message = if (channel == DeliveryManager.Channel.ACCESSIBILITY) "Pasted" else "Copied — paste anywhere",
-                messageIsError = false,
-                activeRecordingId = null,
-                targetPackage = null,
-            )
+        if (ownsLiveState && !isBackgroundRetry) {
+            AppState.update {
+                copy(
+                    pipeline = PipelineState.DONE,
+                    message = if (channel == DeliveryManager.Channel.ACCESSIBILITY) "Pasted" else "Copied — paste anywhere",
+                    messageIsError = false,
+                    activeRecordingId = null,
+                    targetPackage = null,
+                )
+            }
+            scheduleIdleReset()
         }
-        scheduleIdleReset()
         return Result.success()
     }
 
@@ -131,6 +153,23 @@ class TranscribeWorker(
     private suspend fun retryOrFail(id: String, message: String): Result {
         return if (runAttemptCount < MAX_ATTEMPTS) {
             container.recordings.bumpRetry(id)
+            // RC-1.3: DON'T hold the avatar/pipeline hostage to the WorkManager
+            // retry ladder — on a flaky network that ladder can run for many
+            // minutes. Free the fox back to IDLE (only if THIS recording is the
+            // one currently driving the live state) and toast that we'll retry
+            // in the background. The durable Room status stays TRANSCRIBING, so
+            // History still reads as "in flight" and the row is recoverable.
+            if (AppState.state.value.activeRecordingId == id) {
+                AppState.update {
+                    copy(
+                        pipeline = PipelineState.IDLE,
+                        activeRecordingId = null,
+                        targetPackage = null,
+                        message = "Network hiccup — will retry in background",
+                        messageIsError = false,
+                    )
+                }
+            }
             Result.retry()
         } else {
             fail(id, message)
@@ -139,10 +178,16 @@ class TranscribeWorker(
 
     private suspend fun fail(id: String, message: String): Result {
         container.recordings.setError(id, message)
-        AppState.update {
-            copy(pipeline = PipelineState.ERROR, message = message, messageIsError = true, activeRecordingId = null, targetPackage = null)
+        // Only surface the error on the live avatar if THIS recording still owns
+        // it. A background retry that finally exhausts its attempts must not
+        // yank a fresh recording's avatar into ERROR (RC-1.3); the row is marked
+        // errored in Room and shows in History with a Retry affordance.
+        if (AppState.state.value.activeRecordingId == id) {
+            AppState.update {
+                copy(pipeline = PipelineState.ERROR, message = message, messageIsError = true, activeRecordingId = null, targetPackage = null)
+            }
+            scheduleIdleReset()
         }
-        scheduleIdleReset()
         return Result.failure()
     }
 
