@@ -428,6 +428,7 @@ private fun defaultTabFor(mode: DictationMode): Tab = when (mode) {
 
 private fun statusLabel(s: RecordingStatus): String = when (s) {
     RecordingStatus.RECORDING -> "recording"
+    RecordingStatus.IMPORTING -> "importing"
     RecordingStatus.TRANSCRIBING -> "transcribing"
     RecordingStatus.CLEANING -> "polishing"
     RecordingStatus.INJECTING -> "delivering"

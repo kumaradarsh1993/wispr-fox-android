@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [RecordingEntity::class, UsageBucketEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -25,7 +25,7 @@ abstract class AppDatabase : RoomDatabase() {
                 AppDatabase::class.java,
                 "wisprfox_history.db",
             )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
                 .also { instance = it }
         }
@@ -56,6 +56,23 @@ abstract class AppDatabase : RoomDatabase() {
                         "`total_tokens` INTEGER NOT NULL, " +
                         "PRIMARY KEY(`day`, `stage`, `provider`, `model`))"
                 )
+            }
+        }
+
+        /**
+         * Audio-file import (v1.4): per-recording provider/model overrides so an
+         * imported file can be transcribed/cleaned with models chosen on the
+         * import sheet without changing the user's live-dictation defaults, plus
+         * an `imported` flag. All nullable/defaulted — existing rows migrate to
+         * the live-dictation behaviour (overrides null, imported = 0).
+         */
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE recordings ADD COLUMN stt_provider_override TEXT")
+                db.execSQL("ALTER TABLE recordings ADD COLUMN stt_model_override TEXT")
+                db.execSQL("ALTER TABLE recordings ADD COLUMN llm_provider_override TEXT")
+                db.execSQL("ALTER TABLE recordings ADD COLUMN llm_model_override TEXT")
+                db.execSQL("ALTER TABLE recordings ADD COLUMN imported INTEGER NOT NULL DEFAULT 0")
             }
         }
     }

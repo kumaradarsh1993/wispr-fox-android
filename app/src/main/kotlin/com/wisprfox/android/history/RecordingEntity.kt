@@ -30,10 +30,24 @@ data class RecordingEntity(
     @ColumnInfo(name = "clippy_note") val clippyNote: String? = null,
     @ColumnInfo(name = "retry_count") val retryCount: Int = 0,
     val error: String? = null,
+    /**
+     * Per-recording provider/model overrides (schema v4). Live dictation leaves
+     * these null and the pipeline reads the global [AppSettings]; an *imported*
+     * file records the models the user picked on the import sheet here so the
+     * worker honours them without mutating the user's live-dictation defaults.
+     */
+    @ColumnInfo(name = "stt_provider_override") val sttProviderOverride: String? = null,
+    @ColumnInfo(name = "stt_model_override") val sttModelOverride: String? = null,
+    @ColumnInfo(name = "llm_provider_override") val llmProviderOverride: String? = null,
+    @ColumnInfo(name = "llm_model_override") val llmModelOverride: String? = null,
+    /** True when this row came from an imported audio file (not the live mic). */
+    val imported: Boolean = false,
 )
 
 enum class RecordingStatus(val raw: String) {
     RECORDING("recording"),
+    /** Decoding an imported audio file into the pipeline's WAV format. */
+    IMPORTING("importing"),
     TRANSCRIBING("transcribing"),
     CLEANING("cleaning"),
     INJECTING("injecting"),

@@ -43,7 +43,10 @@ class TranscribeWorker(
         val id = inputData.getString(KEY_RECORDING_ID) ?: return Result.failure()
         val recordings = container.recordings
         val rec = recordings.get(id) ?: return Result.failure()
-        val settings = container.currentSettings()
+        // Imported files carry the models the user picked on the import sheet as
+        // per-recording overrides; live dictation leaves them null and this is a
+        // no-op that returns the global settings unchanged.
+        val settings = container.currentSettings().withRecordingOverrides(rec)
 
         // ── STT ────────────────────────────────────────────────────────────
         recordings.setStatus(id, RecordingStatus.TRANSCRIBING)
@@ -116,9 +119,13 @@ class TranscribeWorker(
             recordings.setStatus(id, RecordingStatus.INJECTING)
             AppState.setPipeline(PipelineState.INJECTING)
         }
+        // Imported files are never auto-pasted: the user wasn't in a text field
+        // when they picked the file, so a surprise paste would land in the wrong
+        // place. Their result is clipboard + a "ready" notification, viewable in
+        // History (same path as a background retry).
         val channel = container.delivery.deliver(
             text = finalText,
-            autoPaste = settings.autoPasteEnabled && !isBackgroundRetry,
+            autoPaste = settings.autoPasteEnabled && !isBackgroundRetry && !rec.imported,
             expectedPackage = rec.targetPackage,
         )
         recordings.setStatus(id, RecordingStatus.DONE)

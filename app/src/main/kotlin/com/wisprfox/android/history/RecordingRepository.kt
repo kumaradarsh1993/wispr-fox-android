@@ -26,6 +26,11 @@ data class Recording(
     val clippyNote: String?,
     val retryCount: Int,
     val error: String?,
+    val sttProviderOverride: String? = null,
+    val sttModelOverride: String? = null,
+    val llmProviderOverride: String? = null,
+    val llmModelOverride: String? = null,
+    val imported: Boolean = false,
 ) {
     /** Best text available for the row's own mode (for previews / delivery). */
     fun primaryText(): String? = when (mode) {
@@ -53,6 +58,11 @@ private fun RecordingEntity.toDomain() = Recording(
     clippyNote = clippyNote,
     retryCount = retryCount,
     error = error,
+    sttProviderOverride = sttProviderOverride,
+    sttModelOverride = sttModelOverride,
+    llmProviderOverride = llmProviderOverride,
+    llmModelOverride = llmModelOverride,
+    imported = imported,
 )
 
 /**
@@ -94,6 +104,40 @@ class RecordingRepository(
                 mode = mode.toRaw(),
                 status = RecordingStatus.RECORDING.raw,
                 targetPackage = targetPackage,
+            )
+        )
+        return id
+    }
+
+    /**
+     * Create a row for an imported audio file. The [audioPath] is the WAV target
+     * the [com.wisprfox.android.queue.ImportWorker] will decode into; the row
+     * starts in [RecordingStatus.IMPORTING] so it shows in History as "importing"
+     * while the decode runs. The chosen models are stored as per-recording
+     * overrides so the worker uses them without touching global settings.
+     */
+    suspend fun newImportRecording(
+        audioPath: String,
+        mode: DictationMode,
+        sttProvider: String,
+        sttModel: String,
+        llmProvider: String,
+        llmModel: String,
+    ): String {
+        val id = UUID.randomUUID().toString()
+        dao.insert(
+            RecordingEntity(
+                id = id,
+                createdAt = System.currentTimeMillis(),
+                audioPath = audioPath,
+                mode = mode.toRaw(),
+                status = RecordingStatus.IMPORTING.raw,
+                targetPackage = null,
+                sttProviderOverride = sttProvider,
+                sttModelOverride = sttModel,
+                llmProviderOverride = llmProvider,
+                llmModelOverride = llmModel,
+                imported = true,
             )
         )
         return id

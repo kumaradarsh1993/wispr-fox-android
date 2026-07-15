@@ -1,8 +1,20 @@
 # HANDOVER - wispr-fox-android
 
-> Last update: 2026-07-07. Current nightly: **v1.3.0-nightly.1** (Fable line). Previous Codex preview: v1.2.0-codex.2. Last stable: **v1.1.0** at commit `4cf396b`.
+> Last update: 2026-07-15. Current stable: **v1.4.0** (audio-file import). Prior line: v1.3.0-nightly.1 (Fable). Last stable before this: v1.1.0 at commit `4cf396b`.
 
 This file is the current state-of-the-world for Android. `CLAUDE.md` is useful historical context, but this handover wins when they disagree. The full audit + rationale behind the v1.3.0 batch lives in `docs/AUDIT_2026-07-06_FABLE.md` — read it before touching overlay/delivery/pipeline code.
+
+## What changed in v1.4.0 (audio-file import)
+
+New feature: import existing audio files and run them through the same transcribe → clean/draft pipeline as live dictation. Requested for transcribing longer voice notes and call recordings on an S23 Ultra.
+
+- **Entry point:** an "Import audio file" card on Home opens a bottom sheet (`ui/ImportSheet.kt`) to pick the STT model, output style (Raw/Clean/Draft — single choice, consistent with the rest of the app), and cleanup LLM. Defaults: **Whisper Large v3 / Groq** for STT, **Gemini 3.5 Flash** for cleanup. The button launches SAF `OpenMultipleDocuments("audio/*")`.
+- **Per-recording model overrides (new).** The chosen models are stored on the recording row, not global settings, so imports never disturb the live-dictation model. Room **schema v3→v4** (`MIGRATION_3_4`) adds `stt_provider_override`, `stt_model_override`, `llm_provider_override`, `llm_model_override`, `imported`; `4.json` exported and added to the CI schema check. `TranscribeWorker` folds overrides on via `queue/RecordingOverrides.kt` (`AppSettings.withRecordingOverrides`) and forces clipboard-only (no auto-paste) for `imported` rows.
+- **Decode path:** `audio/AudioImporter.kt` (MediaExtractor + MediaCodec) decodes any device-supported codec (M4A/AAC, MP3, AMR, 3GP, Ogg/Opus, FLAC, WAV — Samsung + iPhone recordings) to the pipeline's mono 16-bit WAV, streaming to `WavWriter` (low memory, any length), source sample rate kept (WavChunker + Whisper handle it). Pure DSP in `audio/PcmDownmix.kt` with unit tests (`PcmDownmixTest`). `queue/ImportWorker.kt` runs the decode durably then hands off to `TranscribeWorker`; `core/ImportController.kt` wires pick → row → worker. New `RecordingStatus.IMPORTING`.
+- **Model due-diligence (2026-07-15):** Groq Whisper Large v3 / v3 Turbo and Gemini 3.5 Flash confirmed current; catalog from 2026-07-07 still accurate, nothing relied-on retired.
+- No new manifest permissions (SAF needs none).
+
+**Still needs real-device QA (S23 Ultra):** import a Samsung Voice Recorder note and a call recording; a long (>20 MB decoded) clip to exercise chunking; confirm History shows the imported row progressing importing → transcribing → done and the text lands on the clipboard; try Raw vs Clean (Gemini) vs Draft.
 
 ## What changed in v1.3.0-nightly.1 (Fable batch)
 

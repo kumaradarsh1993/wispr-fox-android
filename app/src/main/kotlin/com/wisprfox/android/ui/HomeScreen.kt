@@ -5,6 +5,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -29,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
@@ -51,6 +54,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -70,6 +74,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.wisprfox.android.R
 import com.wisprfox.android.WisprFoxApp
 import com.wisprfox.android.core.AppState
+import com.wisprfox.android.core.ImportConfig
 import com.wisprfox.android.core.PipelineState
 import com.wisprfox.android.delivery.WisprFoxAccessibilityService
 import com.wisprfox.android.history.Recording
@@ -110,6 +115,29 @@ fun HomeScreen(onOpenHistory: () -> Unit, onOpenSettings: () -> Unit) {
         onDispose { owner.lifecycle.removeObserver(obs) }
     }
     val missing = remember(permTick) { missingPermissions(ctx) }
+
+    // ── Audio-file import ────────────────────────────────────────────────────
+    // Defaults per the product ask: Whisper Large v3 on Groq for transcription,
+    // Gemini 3.5 Flash for cleanup. These are the import sheet's own selections
+    // and don't disturb the live-dictation model chosen above.
+    var showImport by remember { mutableStateOf(false) }
+    var importConfig by remember {
+        mutableStateOf(
+            ImportConfig(
+                sttProvider = ProviderCatalog.STT_GROQ,
+                sttModel = STT_ACCURATE,
+                mode = DictationMode.CLEANED,
+                llmProvider = ProviderCatalog.LLM_GEMINI,
+                llmModel = ProviderCatalog.defaultLlmModel(ProviderCatalog.LLM_GEMINI),
+            )
+        )
+    }
+    val importPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isNotEmpty()) container.importController.import(uris, importConfig)
+        showImport = false
+    }
 
     Scaffold(
         topBar = {
@@ -263,6 +291,10 @@ fun HomeScreen(onOpenHistory: () -> Unit, onOpenSettings: () -> Unit) {
                 }
             }
 
+            // Import an existing audio file (voice notes, call recordings) and
+            // run it through the same transcribe → clean/draft pipeline.
+            ImportCard(onClick = { showImport = true })
+
             // Usage strip (P-2). Today's Speech + Cleanup for the active
             // provider/model, coloured ok/warn/danger, bars for groq/deepgram.
             val usage = rememberUsageSnapshot(settings)
@@ -276,6 +308,50 @@ fun HomeScreen(onOpenHistory: () -> Unit, onOpenSettings: () -> Unit) {
             // a glance away — the bottom-nav History tab opens the full list).
             RecentsCard(recordings = recordings, onOpenAll = onOpenHistory)
             Spacer(Modifier.height(4.dp))
+        }
+    }
+
+    if (showImport) {
+        ImportSheet(
+            config = importConfig,
+            onConfigChange = { importConfig = it },
+            geminiReady = container.secrets.has(SecureKeyStore.Key.GeminiLlm),
+            onImport = { importPicker.launch(IMPORT_MIME_TYPES) },
+            onDismiss = { showImport = false },
+        )
+    }
+}
+
+// SAF filter for the import picker. The audio wildcard covers every codec the
+// platform can decode (m4a/AAC, mp3, amr, 3gp, ogg/opus, flac, wav) across
+// Samsung and iPhone recordings.
+private val IMPORT_MIME_TYPES = arrayOf("audio/*")
+
+@Composable
+private fun ImportCard(onClick: () -> Unit) {
+    Card(
+        Modifier.fillMaxWidth().clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Icon(Icons.Filled.FileUpload, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Column(Modifier.weight(1f)) {
+                Text("Import audio file", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Transcribe a voice note or call recording from this phone.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

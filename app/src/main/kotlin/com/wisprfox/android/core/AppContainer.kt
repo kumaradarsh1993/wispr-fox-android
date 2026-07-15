@@ -82,6 +82,9 @@ class AppContainer(context: Context) {
     val controller: RecordingController by lazy {
         RecordingController(app, recordings, settingsStore, applicationScope)
     }
+    val importController: ImportController by lazy {
+        ImportController(app, recordings, applicationScope)
+    }
 
     fun audioDir(): File = File(app.getExternalFilesDir(null), "audio").apply { mkdirs() }
 
