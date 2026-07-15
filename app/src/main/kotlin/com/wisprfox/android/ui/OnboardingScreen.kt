@@ -42,6 +42,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -69,6 +70,7 @@ import com.wisprfox.android.delivery.WisprFoxAccessibilityService
 import com.wisprfox.android.provider.ProviderCatalog
 import com.wisprfox.android.settings.FamilyUnlock
 import com.wisprfox.android.settings.SecureKeyStore
+import com.wisprfox.android.sync.SupabaseConfig
 import kotlinx.coroutines.launch
 
 /**
@@ -106,12 +108,18 @@ fun OnboardingScreen(onDone: () -> Unit) {
         onDispose { owner.lifecycle.removeObserver(obs) }
     }
 
+    // Accounts + cross-device sync (v2.0): the sync step only exists in builds
+    // that actually have a Supabase project baked in — an unconfigured build
+    // skips straight from Grant to onDone, so onboarding for those builds is
+    // byte-for-byte what it was before this feature.
+    val totalSteps = if (SupabaseConfig.isConfigured()) 4 else 3
+
     Column(
         Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
     ) {
-        OnboardingHeader(step)
+        OnboardingHeader(step, totalSteps)
 
         AnimatedContent(
             targetState = step,
@@ -137,11 +145,16 @@ fun OnboardingScreen(onDone: () -> Unit) {
                     onBack = { step = 0 },
                     onNext = { step = 2 },
                 )
-                else -> GrantStep(
+                2 -> GrantStep(
                     ctx = ctx,
                     permTick = permTick,
                     onBack = { step = 1 },
-                    onFinish = onDone,
+                    onFinish = { if (SupabaseConfig.isConfigured()) step = 3 else onDone() },
+                )
+                else -> SyncStep(
+                    container = container,
+                    onBack = { step = 2 },
+                    onDone = onDone,
                 )
             }
         }
@@ -151,7 +164,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
 /* ── Header: brand wordmark + progress dots ──────────────────────────────── */
 
 @Composable
-private fun OnboardingHeader(step: Int) {
+private fun OnboardingHeader(step: Int, totalSteps: Int = 3) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -171,7 +184,7 @@ private fun OnboardingHeader(step: Int) {
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            for (i in 0..2) {
+            for (i in 0 until totalSteps) {
                 val color = when {
                     i == step -> MaterialTheme.colorScheme.primary
                     i < step -> MaterialTheme.colorScheme.primaryContainer
@@ -554,6 +567,39 @@ private fun PermissionRow(title: String, subtitle: String, granted: Boolean, cta
                         modifier = Modifier.padding(top = 2.dp),
                     ) { Text(cta) }
                 }
+            }
+        }
+    }
+}
+
+/* ── Screen 4: Sync across devices (accounts, v2.0 — only when configured) ── */
+
+@Composable
+private fun SyncStep(
+    container: com.wisprfox.android.core.AppContainer,
+    onBack: () -> Unit,
+    onDone: () -> Unit,
+) {
+    val authState by container.authManager.state.collectAsState()
+    StepScaffold {
+        Text("Sync across your devices", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text(
+            "Sign in once and your transcripts, API keys, and settings follow you to desktop and the browser too. Totally optional — everything above already works without it.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp)) {
+                AccountSection(container, showDeviceName = false)
+            }
+        }
+
+        Spacer(Modifier.height(2.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedButton(onClick = onBack, modifier = Modifier.weight(1f)) { Text("Back") }
+            Button(onClick = onDone, modifier = Modifier.weight(1f)) {
+                Text(if (authState.signedIn) "Start dictating" else "Continue without an account")
             }
         }
     }

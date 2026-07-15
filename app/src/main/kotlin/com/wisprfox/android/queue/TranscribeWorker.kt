@@ -20,6 +20,7 @@ import com.wisprfox.android.provider.CleanupOrchestrator
 import com.wisprfox.android.provider.DictationMode
 import com.wisprfox.android.provider.ProviderCatalog
 import com.wisprfox.android.provider.SttError
+import com.wisprfox.android.sync.SyncWorker
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
@@ -129,6 +130,12 @@ class TranscribeWorker(
             expectedPackage = rec.targetPackage,
         )
         recordings.setStatus(id, RecordingStatus.DONE)
+
+        // Sync/accounts (v2.0): single choke point for "after a
+        // recording/import completes" — covers live dictation AND imports
+        // (ImportWorker always hands off to this worker). Best-effort/inert
+        // when signed out or unconfigured; never blocks delivery above.
+        SyncWorker.enqueueOnce(applicationContext)
 
         if (ownsLiveState && !isBackgroundRetry) {
             AppState.update {

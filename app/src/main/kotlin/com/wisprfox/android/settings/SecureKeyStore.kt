@@ -28,6 +28,11 @@ class SecureKeyStore(context: Context) {
         DeepgramStt("deepgram_stt"),
         ElevenLabsStt("elevenlabs_stt"),
         GeminiLlm("gemini_llm"),
+        /** Supabase auth (sync/accounts, v2.0). Refresh token only — the access
+         *  token is kept in memory by [com.wisprfox.android.sync.AuthManager]. */
+        SupabaseRefreshToken("supabase_refresh_token"),
+        SupabaseUserEmail("supabase_user_email"),
+        SupabaseUserId("supabase_user_id"),
     }
 
     private val prefs = context.applicationContext

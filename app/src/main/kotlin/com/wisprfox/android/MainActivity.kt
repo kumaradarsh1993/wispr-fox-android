@@ -22,12 +22,15 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.wisprfox.android.core.AppState
 import com.wisprfox.android.overlay.OverlayService
 import com.wisprfox.android.settings.SecureKeyStore
+import com.wisprfox.android.sync.SyncWorker
 import com.wisprfox.android.ui.HistoryScreen
 import com.wisprfox.android.ui.HomeScreen
 import com.wisprfox.android.ui.OnboardingScreen
 import com.wisprfox.android.ui.SettingsScreen
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -52,6 +55,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         requestRuntimePermissions()
         pendingDeepLink = intent?.getStringExtra(EXTRA_OPEN)
+        handleAuthCallbackIfPresent(intent)
         setContent {
             WisprFoxTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = androidx.compose.material3.MaterialTheme.colorScheme.background) {
@@ -70,6 +74,23 @@ class MainActivity : ComponentActivity() {
                                 restoreState = true
                             }
                             pendingDeepLink = null
+                        }
+                    }
+
+                    // Accounts + cross-device sync (v2.0): a 60s in-app ticker
+                    // while this Compose tree is alive (effectively the app's
+                    // whole foreground lifetime, since MainActivity is the only
+                    // activity) — on top of the foreground/periodic/post-recording
+                    // triggers elsewhere. SyncEngine.syncNow() is a fast no-op
+                    // when signed out or unconfigured, and appForeground gates it
+                    // so a backgrounded process doesn't keep polling.
+                    LaunchedEffect(Unit) {
+                        val container = WisprFoxApp.container(this@MainActivity)
+                        while (true) {
+                            delay(60_000)
+                            if (AppState.state.value.appForeground) {
+                                runCatching { container.syncEngine.syncNow() }
+                            }
                         }
                     }
 
@@ -117,9 +138,23 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         // The activity is launched SINGLE_TOP by the delivery notification, so a
-        // tap while it's already running arrives here, not onCreate.
+        // tap while it's already running arrives here, not onCreate. The
+        // Supabase Google-auth Custom Tab redirect (wisprfox://auth-callback)
+        // also lands here — MainActivity is `launchMode="singleTask"` so it's
+        // reused rather than getting a fresh onCreate.
         setIntent(intent)
         intent.getStringExtra(EXTRA_OPEN)?.let { pendingDeepLink = it }
+        handleAuthCallbackIfPresent(intent)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // Accounts + cross-device sync (v2.0): sync on app foreground. Inert
+        // (no-op, no network) when signed out or unconfigured.
+        lifecycleScope.launch {
+            val container = WisprFoxApp.container(this@MainActivity)
+            runCatching { container.syncEngine.syncNow() }
+        }
     }
 
     override fun onResume() {
@@ -131,6 +166,26 @@ class MainActivity : ComponentActivity() {
                 startService(Intent(this@MainActivity, OverlayService::class.java))
             } else {
                 stopService(Intent(this@MainActivity, OverlayService::class.java))
+            }
+        }
+    }
+
+    /**
+     * Completes the Supabase Google PKCE round-trip: the Custom Tab redirects
+     * to `wisprfox://auth-callback?code=...`, which the manifest's intent-filter
+     * routes here (see AndroidManifest.xml). Exchanges the code for a session
+     * and, on success, kicks an immediate initial sync.
+     */
+    private fun handleAuthCallbackIfPresent(intent: Intent?) {
+        val uri = intent?.data ?: return
+        if (uri.scheme != "wisprfox" || uri.host != "auth-callback") return
+        val code = uri.getQueryParameter("code") ?: return
+        lifecycleScope.launch {
+            val container = WisprFoxApp.container(this@MainActivity)
+            val result = container.authManager.completeGoogleSignIn(code)
+            if (result.isSuccess) {
+                SyncWorker.ensurePeriodic(this@MainActivity)
+                SyncWorker.enqueueOnce(this@MainActivity, initial = true)
             }
         }
     }

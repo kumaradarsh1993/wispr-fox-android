@@ -84,6 +84,32 @@ interface RecordingDao {
             "WHERE status IN ('recording','transcribing','cleaning','injecting')"
     )
     suspend fun recoverStranded(): Int
+
+    // ─── Sync (schema v5) ────────────────────────────────────────────────────
+
+    /** Mark a row's synced fields changed. Push only picks up dirty+done rows,
+     *  so marking this on any text mutation (regardless of current status) is
+     *  harmless — it just sits until the row reaches DONE. */
+    @Query("UPDATE recordings SET dirty = 1, updated_at = :now WHERE id = :id")
+    suspend fun markDirty(id: String, now: Long)
+
+    /** First-sign-in bootstrap: every already-finished row becomes push-worthy. */
+    @Query("UPDATE recordings SET dirty = 1 WHERE status = 'done'")
+    suspend fun markAllDoneDirty()
+
+    @Query("UPDATE recordings SET dirty = 0 WHERE id IN (:ids)")
+    suspend fun clearDirty(ids: List<String>)
+
+    /** Rows to push: locally changed, terminal status, not a read-only row
+     *  pulled from another device. */
+    @Query("SELECT * FROM recordings WHERE dirty = 1 AND status = 'done' AND remote = 0")
+    suspend fun listDirtyDone(): List<RecordingEntity>
+
+    @Query("SELECT updated_at FROM recordings WHERE id = :id")
+    suspend fun getUpdatedAt(id: String): Long?
+
+    @Query("UPDATE recordings SET platform = :platform, device_name = :deviceName WHERE id = :id")
+    suspend fun setDeviceLabel(id: String, platform: String, deviceName: String?)
 }
 
 data class PurgeRow(

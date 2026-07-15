@@ -1,8 +1,21 @@
 # HANDOVER - wispr-fox-android
 
-> Last update: 2026-07-15. Current stable: **v1.4.0** (audio-file import). Prior line: v1.3.0-nightly.1 (Fable). Last stable before this: v1.1.0 at commit `4cf396b`.
+> Last update: 2026-07-16. Active nightly: **v2.0.0-nightly.1** (accounts + cross-device sync). Current stable: **v1.4.0** (audio-file import). Last stable before this: v1.1.0 at commit `4cf396b`.
 
 This file is the current state-of-the-world for Android. `CLAUDE.md` is useful historical context, but this handover wins when they disagree. The full audit + rationale behind the v1.3.0 batch lives in `docs/AUDIT_2026-07-06_FABLE.md` — read it before touching overlay/delivery/pipeline code.
+
+## What changed in v2.0.0-nightly.1 (accounts + cross-device sync)
+
+> **⚠ Scope override:** `CLAUDE.md` says "Don't add account signup." The owner **intentionally overrode that on 2026-07-16** — sign-in is now a first-class, *optional* feature. Local-only (signed-out) mode is unchanged; BYOK still works without any account. This handover wins over that older CLAUDE.md rule.
+
+Optional Google (Custom Tab + `wisprfox://auth-callback` deep-link PKCE) or email/password sign-in against a shared **Supabase** backend. Signed-in devices sync *transcripts* + API keys across desktop/web/mobile; **audio never leaves the phone**. Reworked delete (long-press a row or bulk) → dialog: voice files / transcripts × this-device / everywhere (cloud tombstones). Platform badges (Desktop/Web/Mobile) per row.
+
+- **Backend + setup is shared across all three apps** — canonical spec `../wispr-fox-web/docs/SYNC_DESIGN.md`; user setup `../wispr-fox-web/SETUP_ACCOUNTS.md`; **secrets in the gitignored `../wispr-fox-web/SECRETS.local.md`** (Supabase URL/anon key baked into `sync/SupabaseConfig.kt`, Google OAuth client).
+- **New `sync/` package:** `SupabaseConfig`, `AuthManager`, `SyncEngine`, `SyncWorker`, `SyncModels`, `SyncTime`. Triggers: post-transcribe choke point in `TranscribeWorker`, `MainActivity.onStart`, a 60s foreground ticker, and a ~15min `SyncWorker`.
+- **Room v4→v5** (`MIGRATION_4_5`, `5.json` exported + CI-checked): `recordings` gains `platform`/`device_name`/`dirty`/`remote`/`updated_at`; new `sync_meta` + `sync_exclusions` tables (`SyncMetaEntity`, `SyncExclusionEntity`).
+- **UI:** `ui/AccountSection.kt` in Settings (sign in/out, device name, Sync now), a skippable "Sync across your devices" onboarding step (only when `SupabaseConfig.isConfigured()`), `ui/DeleteDialog.kt`, platform badges + remote-row action hiding in `HistoryScreen`.
+- Tokens stored in `SecureKeyStore` (AndroidKeyStore-encrypted). No service-role key anywhere — anon key + each user's login JWT only.
+- Verified: `./gradlew :app:testDebugUnitTest` BUILD SUCCESSFUL (KSP + Room migration validation); `5.json` exported (9.4 KB). **Real-device QA still owed:** Google OAuth round-trip, cross-device pull, delete-everywhere tombstone propagation.
 
 ## What changed in v1.4.0 (audio-file import)
 

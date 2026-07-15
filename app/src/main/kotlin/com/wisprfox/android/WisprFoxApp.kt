@@ -24,6 +24,9 @@ class WisprFoxApp : Application() {
         container.applicationScope.launch {
             runCatching { container.recordings.recoverStranded() }
         }
+        // Accounts + cross-device sync (v2.0): re-arm the periodic sync job if
+        // we're signed in (no-op otherwise, and a no-op if unconfigured).
+        container.ensureBackgroundSyncScheduled()
     }
 
     /**

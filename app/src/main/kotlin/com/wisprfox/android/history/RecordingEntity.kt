@@ -42,6 +42,23 @@ data class RecordingEntity(
     @ColumnInfo(name = "llm_model_override") val llmModelOverride: String? = null,
     /** True when this row came from an imported audio file (not the live mic). */
     val imported: Boolean = false,
+    /**
+     * Sync/accounts (schema v5). `platform` is "mobile" for rows created on
+     * this device and "desktop"/"web"/"mobile" for rows pulled from another
+     * device via the cloud; null on rows created before this migration until
+     * they're touched again (display treats null as "mobile" — this device).
+     * `device_name` is best-effort (only populated for locally-created rows;
+     * pulled rows don't carry a device label in the `notes` table, see
+     * SyncEngine). `dirty` marks a row with local changes not yet pushed.
+     * `remote` marks a row that came from another device (no local audio —
+     * HistoryScreen hides audio-dependent actions for these). `updated_at` is
+     * the LWW clock for the sync protocol; defaults to `created_at`.
+     */
+    val platform: String? = null,
+    @ColumnInfo(name = "device_name") val deviceName: String? = null,
+    val dirty: Boolean = false,
+    val remote: Boolean = false,
+    @ColumnInfo(name = "updated_at") val updatedAt: Long = createdAt,
 )
 
 enum class RecordingStatus(val raw: String) {

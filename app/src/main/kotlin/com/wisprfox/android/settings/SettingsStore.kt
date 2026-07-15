@@ -6,12 +6,15 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.wisprfox.android.provider.DictationMode
 import com.wisprfox.android.provider.ProviderCatalog
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import java.util.UUID
 
 /**
  * Non-secret user settings, backed by DataStore Preferences. Mirrors the subset
@@ -39,6 +42,11 @@ data class AppSettings(
     val avatarScale: AvatarScale = AvatarScale.MEDIUM,
     /** null = let Whisper auto-detect (the locked English↔Hindi decision). */
     val languageHint: String? = null,
+    /** Editable label for this install shown on synced rows from other devices
+     *  (sync/accounts, v2.0). Defaults to the phone model. */
+    val deviceName: String = android.os.Build.MODEL ?: "Android phone",
+    /** Epoch millis of the last successful sync, or null if never synced. */
+    val lastSyncedAt: Long? = null,
 ) {
     /** The model name to use for the currently selected LLM provider. */
     val activeLlmModel: String get() = when (llmProvider) {
@@ -74,6 +82,9 @@ class SettingsStore(private val context: Context) {
         val avatar = stringPreferencesKey("avatar")
         val avatarScale = stringPreferencesKey("avatar_scale")
         val languageHint = stringPreferencesKey("language_hint")
+        val deviceName = stringPreferencesKey("device_name")
+        val lastSyncedAt = longPreferencesKey("last_synced_at")
+        val deviceId = stringPreferencesKey("device_id")
     }
 
     val settings: Flow<AppSettings> = context.dataStore.data.map { p -> p.toSettings() }
@@ -99,6 +110,8 @@ class SettingsStore(private val context: Context) {
             avatar = this[Keys.avatar]?.let { runCatching { Avatar.valueOf(it) }.getOrNull() } ?: defaults.avatar,
             avatarScale = this[Keys.avatarScale]?.let { runCatching { AvatarScale.valueOf(it) }.getOrNull() } ?: defaults.avatarScale,
             languageHint = this[Keys.languageHint]?.takeIf { it.isNotBlank() } ?: defaults.languageHint,
+            deviceName = this[Keys.deviceName]?.takeIf { it.isNotBlank() } ?: defaults.deviceName,
+            lastSyncedAt = this[Keys.lastSyncedAt],
         )
     }
 
@@ -122,6 +135,31 @@ class SettingsStore(private val context: Context) {
     suspend fun setHaptics(v: Boolean) = edit { it[Keys.haptics] = v }
     suspend fun setAvatar(v: Avatar) = edit { it[Keys.avatar] = v.name }
     suspend fun setAvatarScale(v: AvatarScale) = edit { it[Keys.avatarScale] = v.name }
+    suspend fun setDeviceName(v: String) = edit { it[Keys.deviceName] = v }
+    suspend fun setLastSyncedAt(v: Long) = edit { it[Keys.lastSyncedAt] = v }
+
+    /**
+     * Stable per-install id (sync/accounts, v2.0), generated once and persisted
+     * in DataStore per [com.wisprfox.android.sync.SyncEngine]'s device-registration
+     * contract. Safe to call repeatedly/concurrently — DataStore's `edit` is
+     * transactional so a racing pair of first-callers still converge on one id.
+     */
+    suspend fun deviceId(): String {
+        val existing = context.dataStore.data.first()[Keys.deviceId]
+        if (existing != null) return existing
+        val fresh = UUID.randomUUID().toString()
+        var winner = fresh
+        context.dataStore.edit { p ->
+            val current = p[Keys.deviceId]
+            if (current != null) {
+                winner = current
+            } else {
+                p[Keys.deviceId] = fresh
+                winner = fresh
+            }
+        }
+        return winner
+    }
 
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
         context.dataStore.edit(block)

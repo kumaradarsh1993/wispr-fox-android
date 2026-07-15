@@ -208,6 +208,10 @@ fun SettingsScreen(onBack: () -> Unit, onReplayOnboarding: () -> Unit = {}) {
             )
 
             HorizontalDivider()
+            SectionTitle("Account")
+            AccountSection(container)
+
+            HorizontalDivider()
             SectionTitle("About")
             Text("wispr-fox for Android - bring-your-own-key dictation. Audio is sent only to the provider you choose for that request; keys stay encrypted on this phone.", style = MaterialTheme.typography.bodySmall)
             OutlinedButton(onClick = onReplayOnboarding, modifier = Modifier.fillMaxWidth()) {

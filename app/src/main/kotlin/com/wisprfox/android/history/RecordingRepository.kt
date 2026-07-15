@@ -31,6 +31,12 @@ data class Recording(
     val llmProviderOverride: String? = null,
     val llmModelOverride: String? = null,
     val imported: Boolean = false,
+    /** Sync/accounts (schema v5). Null platform means "this device" (mobile). */
+    val platform: String? = null,
+    val deviceName: String? = null,
+    /** True for a row pulled from another device — no local audio exists for
+     *  it, so the UI hides play/retry for these. */
+    val remote: Boolean = false,
 ) {
     /** Best text available for the row's own mode (for previews / delivery). */
     fun primaryText(): String? = when (mode) {
@@ -39,7 +45,38 @@ data class Recording(
         DictationMode.ADVANCED -> cleanedText ?: transcript
         DictationMode.REFORMATTED -> draftedText ?: transcript
     }
+
+    /** Badge label for [platform] — local rows (null) read as "Mobile". */
+    fun platformLabel(): String = when (platform) {
+        "desktop" -> "Desktop"
+        "web" -> "Web"
+        else -> "Mobile"
+    }
 }
+
+/**
+ * A pulled `notes` row, already time-parsed to epoch millis by
+ * [com.wisprfox.android.sync.SyncEngine] (kept out of the `history` package so
+ * it has no dependency on `sync`'s wire types). `deletedAtMillis != null` means
+ * this is a tombstone.
+ */
+data class RemotePulledNote(
+    val id: String,
+    val platform: String,
+    val origin: String,
+    val title: String?,
+    val transcript: String?,
+    val cleanedText: String?,
+    val draftedText: String?,
+    val durationMs: Long,
+    val sttProvider: String?,
+    val llmProvider: String?,
+    val createdAtMillis: Long,
+    val updatedAtMillis: Long,
+    val deletedAtMillis: Long?,
+)
+
+enum class DeleteScope { THIS_DEVICE, EVERYWHERE }
 
 private fun RecordingEntity.toDomain() = Recording(
     id = id,
@@ -63,6 +100,9 @@ private fun RecordingEntity.toDomain() = Recording(
     llmProviderOverride = llmProviderOverride,
     llmModelOverride = llmModelOverride,
     imported = imported,
+    platform = platform,
+    deviceName = deviceName,
+    remote = remote,
 )
 
 /**
@@ -85,6 +125,16 @@ class RecordingRepository(
      * Returns null when settings aren't available (usage tally is skipped).
      */
     private val activeModels: (suspend () -> ActiveModels?)? = null,
+    /** Sync/accounts (schema v5). Null in any context that doesn't wire sync
+     *  (e.g. tests) — every use below is guarded so the repository still works
+     *  as pure local storage without it. */
+    private val exclusionDao: SyncExclusionDao? = null,
+    /** Best-effort cloud tombstone (set `deleted_at` + null out the text
+     *  columns) for an "delete everywhere" request, invoked BEFORE the local
+     *  rows are removed. Supplied by [com.wisprfox.android.core.AppContainer]
+     *  as a lambda into [com.wisprfox.android.sync.SyncEngine] so this package
+     *  doesn't need a compile-time dependency on `sync`. */
+    private val tombstoneRemote: (suspend (List<String>) -> Unit)? = null,
 ) {
 
     data class ActiveModels(
@@ -148,11 +198,19 @@ class RecordingRepository(
 
     suspend fun get(id: String): Recording? = dao.getById(id)?.toDomain()
 
-    suspend fun setStatus(id: String, status: RecordingStatus) = dao.setStatus(id, status.raw)
+    suspend fun setStatus(id: String, status: RecordingStatus) {
+        dao.setStatus(id, status.raw)
+        // Sync/accounts: a row becomes push-worthy the moment it lands DONE
+        // (push itself additionally filters status='done', so this is safe
+        // even if the row later errors out and gets retried — it'll just be
+        // re-marked dirty when it reaches DONE again).
+        if (status == RecordingStatus.DONE) dao.markDirty(id, System.currentTimeMillis())
+    }
     suspend fun setError(id: String, error: String) = dao.setError(id, error)
     suspend fun setDuration(id: String, durationMs: Long) = dao.setDuration(id, durationMs)
     suspend fun setTranscript(id: String, transcript: String, provider: String) {
         dao.setTranscript(id, transcript, provider)
+        dao.markDirty(id, System.currentTimeMillis())
         tallyStt(id, provider)
     }
     suspend fun bumpRetry(id: String) = dao.bumpRetry(id)
@@ -169,6 +227,7 @@ class RecordingRepository(
             AltKind.CLEANED -> dao.setCleaned(id, text, provider, used, note)
             AltKind.DRAFTED -> dao.setDrafted(id, text, provider, used, note)
         }
+        dao.markDirty(id, System.currentTimeMillis())
         // Only a real LLM call counts; a graceful degrade to raw (missing key /
         // provider down) sets used=false and must NOT inflate the usage meter.
         if (used) tallyLlm(provider)
@@ -275,6 +334,112 @@ class RecordingRepository(
                 dao.delete(row.id)
                 total -= size
             }
+        }
+    }
+
+    // ─── Sync (schema v5) ────────────────────────────────────────────────────
+
+    /** First sign-in: every already-finished row is worth pushing once. */
+    suspend fun markAllDoneDirtyForInitialSync() = dao.markAllDoneDirty()
+
+    /** Rows [SyncEngine] should push this round. */
+    suspend fun dirtyDoneRows(): List<RecordingEntity> = dao.listDirtyDone()
+
+    suspend fun clearDirty(ids: List<String>) = dao.clearDirty(ids)
+
+    /** Stamp a freshly-created local row with this device's label so other
+     *  clients' History shows where it came from once it syncs up. */
+    suspend fun labelAsThisDevice(id: String, deviceName: String?) =
+        dao.setDeviceLabel(id, "mobile", deviceName)
+
+    /**
+     * Apply one pulled `notes` row, last-write-wins by `updated_at`: a
+     * tombstone always wins (deletes the local row + its WAV, same as a local
+     * delete); otherwise the pulled row only overwrites local state if it's
+     * strictly newer, so a local edit racing a pull never gets clobbered by a
+     * stale remote copy. An id in [sync_exclusions] means the user explicitly
+     * removed it "this device only" — skip re-inserting it (tombstones still
+     * apply; they mean the row is gone everywhere, which is what the
+     * exclusion wanted for THIS device anyway).
+     *
+     * Cloud rows have no local WAV (audio never syncs), so [audioPath] is left
+     * empty — HistoryScreen checks [Recording.remote] to hide play/retry.
+     * The cloud `notes` schema has no `mode` column, so it's inferred from
+     * which text column is populated (documented deviation — see HANDOVER).
+     */
+    suspend fun applyRemoteNote(note: RemotePulledNote) {
+        if (note.deletedAtMillis != null) {
+            applyTombstone(note.id)
+            return
+        }
+        if (exclusionDao?.exists(note.id) == true) return
+        val localUpdatedAt = dao.getUpdatedAt(note.id)
+        if (localUpdatedAt != null && localUpdatedAt >= note.updatedAtMillis) return
+
+        val mode = when {
+            !note.draftedText.isNullOrBlank() -> DictationMode.REFORMATTED
+            !note.cleanedText.isNullOrBlank() -> DictationMode.CLEANED
+            else -> DictationMode.RAW
+        }
+        dao.insert(
+            RecordingEntity(
+                id = note.id,
+                createdAt = note.createdAtMillis,
+                audioPath = "",
+                durationMs = note.durationMs,
+                mode = mode.toRaw(),
+                status = RecordingStatus.DONE.raw,
+                transcript = note.transcript,
+                cleanedText = note.cleanedText,
+                draftedText = note.draftedText,
+                sttProvider = note.sttProvider,
+                llmProvider = note.llmProvider,
+                imported = note.origin == "upload",
+                platform = note.platform,
+                deviceName = null,
+                dirty = false,
+                remote = true,
+                updatedAt = note.updatedAtMillis,
+            )
+        )
+    }
+
+    /** A row is gone everywhere: remove it locally (row + WAV, same effect as
+     *  a local delete) so this client converges with the tombstone. */
+    suspend fun applyTombstone(id: String) = delete(id)
+
+    /** "Voice files" delete: drop the local WAV, keep the row (it reads as
+     *  "audio removed" once the file is gone — no separate flag needed, the
+     *  UI can check file existence). Never touches sync state; audio never
+     *  leaves the device in the first place. */
+    suspend fun deleteAudioOnly(ids: List<String>) {
+        if (ids.isEmpty()) return
+        for (row in dao.getPathsForIds(ids)) {
+            runCatching { File(row.audioPath).delete() }
+        }
+    }
+
+    /**
+     * "Transcripts" delete, per `SYNC_DESIGN.md`'s delete rework:
+     * - [DeleteScope.THIS_DEVICE]: remove the local rows (+ their WAVs) and
+     *   record the ids in `sync_exclusions` so the next pull doesn't
+     *   resurrect them — the cloud copy (and other devices') is untouched.
+     * - [DeleteScope.EVERYWHERE]: best-effort tombstone the cloud rows FIRST
+     *   (via [tombstoneRemote], wired to [com.wisprfox.android.sync.SyncEngine]
+     *   by the container), then remove locally. Every other signed-in device
+     *   applies the same tombstone on its next pull.
+     */
+    suspend fun deleteTranscripts(ids: List<String>, scope: DeleteScope) {
+        if (ids.isEmpty()) return
+        if (scope == DeleteScope.EVERYWHERE) {
+            runCatching { tombstoneRemote?.invoke(ids) }
+        }
+        for (row in dao.getPathsForIds(ids)) {
+            runCatching { File(row.audioPath).delete() }
+        }
+        dao.deleteIds(ids)
+        if (scope == DeleteScope.THIS_DEVICE) {
+            runCatching { exclusionDao?.insertAll(ids) }
         }
     }
 }

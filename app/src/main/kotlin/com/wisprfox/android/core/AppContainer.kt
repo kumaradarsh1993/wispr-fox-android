@@ -11,10 +11,14 @@ import com.wisprfox.android.history.UsageRepository
 import com.wisprfox.android.settings.AppSettings
 import com.wisprfox.android.settings.SecureKeyStore
 import com.wisprfox.android.settings.SettingsStore
+import com.wisprfox.android.sync.AuthManager
+import com.wisprfox.android.sync.SyncEngine
+import com.wisprfox.android.sync.SyncWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.io.File
 
@@ -60,6 +64,10 @@ class AppContainer(context: Context) {
     val database: AppDatabase by lazy { AppDatabase.get(app) }
     // P-2 usage tracking (per-day per-model buckets + Deepgram lifetime spend).
     val usage: UsageRepository by lazy { UsageRepository(app, database.usageBucketDao()) }
+    // Accounts + cross-device sync (v2.0). authManager/syncEngine are inert
+    // (never make a network call, never crash) when SupabaseConfig isn't
+    // baked with real values — see SupabaseConfig.isConfigured().
+    val authManager: AuthManager by lazy { AuthManager(http, secrets) }
     val recordings: RecordingRepository by lazy {
         RecordingRepository(
             dao = database.recordingDao(),
@@ -75,6 +83,22 @@ class AppContainer(context: Context) {
                     llmModel = s.activeLlmModel,
                 )
             },
+            exclusionDao = database.syncExclusionDao(),
+            // `syncEngine` is a `by lazy` property below referencing `recordings`
+            // right back — safe because neither is evaluated until first
+            // accessed, and nothing here touches `syncEngine` until a delete
+            // actually needs to tombstone (same trick as `activeModels` above).
+            tombstoneRemote = { ids -> syncEngine.tombstoneNotes(ids) },
+        )
+    }
+    val syncEngine: SyncEngine by lazy {
+        SyncEngine(
+            baseClient = http,
+            authManager = authManager,
+            settingsStore = settingsStore,
+            recordings = recordings,
+            syncMetaDao = database.syncMetaDao(),
+            secrets = secrets,
         )
     }
     val providerFactory: ProviderFactory by lazy { ProviderFactory(http, secrets) }
@@ -89,4 +113,12 @@ class AppContainer(context: Context) {
     fun audioDir(): File = File(app.getExternalFilesDir(null), "audio").apply { mkdirs() }
 
     suspend fun currentSettings(): AppSettings = settingsStore.settings.first()
+
+    /** Re-arm the periodic background sync job if the user is signed in.
+     *  Safe to call on every process start (idempotent via `KEEP`). */
+    fun ensureBackgroundSyncScheduled() {
+        applicationScope.launch {
+            if (authManager.isSignedIn()) SyncWorker.ensurePeriodic(app)
+        }
+    }
 }

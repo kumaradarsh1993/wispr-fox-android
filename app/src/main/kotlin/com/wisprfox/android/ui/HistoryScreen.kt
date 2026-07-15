@@ -1,7 +1,9 @@
 package com.wisprfox.android.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -61,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import com.wisprfox.android.WisprFoxApp
 import com.wisprfox.android.core.AltVersionGenerator
 import com.wisprfox.android.history.AltKind
+import com.wisprfox.android.history.DeleteScope
 import com.wisprfox.android.history.Recording
 import com.wisprfox.android.history.RecordingStatus
 import com.wisprfox.android.provider.DictationMode
@@ -92,6 +95,9 @@ fun HistoryScreen(onBack: () -> Unit, onOpenHome: () -> Unit) {
     val recordings by container.recordings.observeRecent().collectAsState(initial = emptyList())
     val player = rememberAudioPlayer()
 
+    val authState by container.authManager.state.collectAsState()
+    val signedIn = authState.signedIn
+
     var selectMode by remember { mutableStateOf(false) }
     val selected = remember { mutableStateMapOf<String, Boolean>() }
     var menuOpen by remember { mutableStateOf(false) }
@@ -101,6 +107,18 @@ fun HistoryScreen(onBack: () -> Unit, onOpenHome: () -> Unit) {
     fun exitSelectMode() {
         selectMode = false
         selected.clear()
+    }
+
+    // Shared delete applier for the bulk paths (delete-all + multi-select) —
+    // routes the DeleteDialog's choices to the repository the same way the
+    // per-row path does, so semantics never diverge between the three surfaces.
+    fun applyDelete(ids: List<String>, voiceFiles: Boolean, transcripts: Boolean, scope2: DeleteScope) {
+        scope.launch {
+            when {
+                transcripts -> container.recordings.deleteTranscripts(ids, scope2)
+                voiceFiles -> container.recordings.deleteAudioOnly(ids)
+            }
+        }
     }
 
     Scaffold(
@@ -173,6 +191,7 @@ fun HistoryScreen(onBack: () -> Unit, onOpenHome: () -> Unit) {
                         rec = rec,
                         player = player,
                         selectMode = selectMode,
+                        signedIn = signedIn,
                         checked = selected[rec.id] == true,
                         onToggleSelect = { selected[rec.id] = !(selected[rec.id] ?: false) },
                     )
@@ -182,14 +201,14 @@ fun HistoryScreen(onBack: () -> Unit, onOpenHome: () -> Unit) {
     }
 
     if (confirmDeleteAll) {
-        ConfirmDialog(
-            title = "Delete everything?",
-            body = "This removes every recording — transcripts and the WAV audio on this phone. There's no undo.",
-            confirm = "Delete all",
+        val ids = recordings.map { it.id }
+        DeleteDialog(
+            itemCount = ids.size,
+            signedIn = signedIn,
             onDismiss = { confirmDeleteAll = false },
-            onConfirm = {
+            onConfirm = { voiceFiles, transcripts, delScope ->
                 confirmDeleteAll = false
-                scope.launch { container.recordings.deleteAll() }
+                applyDelete(ids, voiceFiles, transcripts, delScope)
                 exitSelectMode()
             },
         )
@@ -197,25 +216,26 @@ fun HistoryScreen(onBack: () -> Unit, onOpenHome: () -> Unit) {
 
     if (confirmDeleteSelected) {
         val ids = selected.filter { it.value }.keys.toList()
-        ConfirmDialog(
-            title = "Delete ${ids.size} recording${if (ids.size == 1) "" else "s"}?",
-            body = "The transcripts and the WAV audio for the selected recordings will be removed from this phone.",
-            confirm = "Delete",
+        DeleteDialog(
+            itemCount = ids.size,
+            signedIn = signedIn,
             onDismiss = { confirmDeleteSelected = false },
-            onConfirm = {
+            onConfirm = { voiceFiles, transcripts, delScope ->
                 confirmDeleteSelected = false
-                scope.launch { container.recordings.deleteMany(ids) }
+                applyDelete(ids, voiceFiles, transcripts, delScope)
                 exitSelectMode()
             },
         )
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun HistoryRow(
     rec: Recording,
     player: AudioPlayerState,
     selectMode: Boolean,
+    signedIn: Boolean,
     checked: Boolean,
     onToggleSelect: () -> Unit,
 ) {
@@ -236,9 +256,13 @@ private fun HistoryRow(
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = rowBg)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(
-                Modifier.fillMaxWidth().clickable {
-                    if (selectMode) onToggleSelect() else expanded = !expanded
-                },
+                Modifier.fillMaxWidth().combinedClickable(
+                    onClick = { if (selectMode) onToggleSelect() else expanded = !expanded },
+                    // Long-press opens the delete dialog straight for this row
+                    // (SYNC_DESIGN.md press-and-hold delete), unless we're in
+                    // multi-select where a long-press has no separate meaning.
+                    onLongClick = { if (!selectMode) confirmDelete = true },
+                ),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
@@ -254,6 +278,7 @@ private fun HistoryRow(
                 Column(Modifier.weight(1f)) {
                     Text(timeFmt.format(Date(rec.createdAt)), fontWeight = FontWeight.SemiBold)
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        PlatformBadge(rec.platformLabel())
                         Text(
                             "${rec.mode.label} · ${rec.durationMs / 1000}s · ${statusLabel(rec.status)}",
                             style = MaterialTheme.typography.bodySmall,
@@ -274,7 +299,8 @@ private fun HistoryRow(
                         }
                     }
                 }
-                if (!selectMode) {
+                // Rows synced from another device have no local audio — hide play.
+                if (!selectMode && !rec.remote) {
                     val playing = player.playingPath == rec.audioPath
                     IconButton(onClick = { player.toggle(rec.audioPath) }) {
                         Icon(
@@ -337,26 +363,31 @@ private fun HistoryRow(
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AssistChip(
-                        onClick = {
-                            // Same pattern as desktop's retry(): if the row's
-                            // not an error, confirm before nuking existing
-                            // text. If it IS an error, fire immediately —
-                            // that's the whole point of retry.
-                            if (isError) {
-                                scope.launch { container.recordings.retry(ctx, rec.id) }
-                            } else {
-                                confirmRetry = true
-                            }
-                        },
-                        label = { Text(if (isError) "Retry" else "Re-run") },
-                        leadingIcon = { Icon(Icons.Filled.Refresh, contentDescription = null) },
-                        colors = if (isError) AssistChipDefaults.assistChipColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            labelColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                            leadingIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                        ) else AssistChipDefaults.assistChipColors(),
-                    )
+                    // Retry/Re-run re-transcribes from the local WAV — a remote
+                    // row (synced from another device) has no local audio, so
+                    // it's hidden there; only Delete remains.
+                    if (!rec.remote) {
+                        AssistChip(
+                            onClick = {
+                                // Same pattern as desktop's retry(): if the row's
+                                // not an error, confirm before nuking existing
+                                // text. If it IS an error, fire immediately —
+                                // that's the whole point of retry.
+                                if (isError) {
+                                    scope.launch { container.recordings.retry(ctx, rec.id) }
+                                } else {
+                                    confirmRetry = true
+                                }
+                            },
+                            label = { Text(if (isError) "Retry" else "Re-run") },
+                            leadingIcon = { Icon(Icons.Filled.Refresh, contentDescription = null) },
+                            colors = if (isError) AssistChipDefaults.assistChipColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                labelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                leadingIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            ) else AssistChipDefaults.assistChipColors(),
+                        )
+                    }
                     AssistChip(
                         onClick = { confirmDelete = true },
                         label = { Text("Delete") },
@@ -381,15 +412,36 @@ private fun HistoryRow(
         )
     }
     if (confirmDelete) {
-        ConfirmDialog(
-            title = "Delete this recording?",
-            body = "The transcript and the WAV audio file will be removed from this phone.",
-            confirm = "Delete",
+        DeleteDialog(
+            itemCount = 1,
+            signedIn = signedIn,
             onDismiss = { confirmDelete = false },
-            onConfirm = {
+            onConfirm = { voiceFiles, transcripts, delScope ->
                 confirmDelete = false
-                scope.launch { container.recordings.delete(rec.id) }
+                val ids = listOf(rec.id)
+                scope.launch {
+                    when {
+                        transcripts -> container.recordings.deleteTranscripts(ids, delScope)
+                        voiceFiles -> container.recordings.deleteAudioOnly(ids)
+                    }
+                }
             },
+        )
+    }
+}
+
+/** Small chip showing where a recording came from (Desktop / Web / Mobile). */
+@Composable
+private fun PlatformBadge(label: String) {
+    Box(
+        Modifier
+            .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(6.dp))
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
         )
     }
 }
