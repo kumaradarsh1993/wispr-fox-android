@@ -89,6 +89,17 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    lint {
+        // androidx.lifecycle ships this detector compiled against a newer
+        // Kotlin Analysis API than AGP 8.7.3's bundled lint, so it dies with
+        // IncompatibleClassChangeError ("Found class KaCallableMemberCall, but
+        // interface was expected") and takes lintVitalRelease — and therefore
+        // the whole release build — down with it. It only checks LiveData
+        // nullability, and this app has no LiveData at all (Compose + StateFlow
+        // throughout), so we lose no coverage. Revisit when AGP moves.
+        disable += "NullSafeMutableLiveData"
+    }
 }
 
 dependencies {
