@@ -16,11 +16,13 @@ import com.wisprfox.android.core.PipelineState
 import com.wisprfox.android.delivery.DeliveryManager
 import com.wisprfox.android.history.AltKind
 import com.wisprfox.android.history.RecordingStatus
+import com.wisprfox.android.overlay.OverlayVisibility
 import com.wisprfox.android.provider.CleanupOrchestrator
 import com.wisprfox.android.provider.DictationMode
 import com.wisprfox.android.provider.ProviderCatalog
 import com.wisprfox.android.provider.SttError
 import com.wisprfox.android.sync.SyncWorker
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
@@ -40,8 +42,59 @@ class TranscribeWorker(
 
     private val container get() = WisprFoxApp.container(applicationContext)
 
+    /**
+     * P1-4: [runPipeline] sets the live pipeline to TRANSCRIBING/CLEANING/INJECTING and
+     * only *some* of what follows is guarded — a Room write, the provider factory, or
+     * delivery can all throw. A throw out of doWork() is a WorkManager failure, not a
+     * retry, and nothing then resets [AppState]: the fox is pinned on screen forever
+     * (OverlayVisibility.isBusy() is true for those states) and
+     * RecordingController.toggle() falls into its silent `else`, so the user cannot
+     * record again until the process is killed. That's a permanent lock-out from a
+     * single Room hiccup, and it re-opens the RC-1.1 "fox sticks around" bug by a
+     * second route.
+     *
+     * So: catch everything, surface it, and release the live state no matter what.
+     */
     override suspend fun doWork(): Result {
         val id = inputData.getString(KEY_RECORDING_ID) ?: return Result.failure()
+        return try {
+            runPipeline(id)
+        } catch (c: CancellationException) {
+            // Cooperative cancellation (WorkManager stopped us). The finally below
+            // still frees the fox; don't swallow it into a "failure".
+            throw c
+        } catch (t: Throwable) {
+            // `fail` does the right thing already (Room row errored + Retry affordance
+            // in History + the message on the avatar). Guard it too: it writes to Room,
+            // which is one of the things that can throw in the first place.
+            runCatching { fail(id, UNEXPECTED_FAILURE_MESSAGE) }.getOrDefault(Result.failure())
+        } finally {
+            releaseLiveState(id)
+        }
+    }
+
+    /**
+     * P1-4: the backstop. Every normal exit path above (success, retryOrFail, fail)
+     * already clears `activeRecordingId`, so this is a no-op for them — it only fires
+     * when something threw or we were cancelled part-way, which is precisely the case
+     * that used to wedge. RECORDING is excluded: that state belongs to a *fresh*
+     * dictation, never to a worker.
+     */
+    private fun releaseLiveState(id: String) {
+        val snap = AppState.state.value
+        if (snap.activeRecordingId != id) return
+        if (snap.pipeline == PipelineState.RECORDING || !OverlayVisibility.isBusy(snap.pipeline)) return
+        AppState.update {
+            copy(
+                pipeline = PipelineState.IDLE,
+                message = null,
+                activeRecordingId = null,
+                targetPackage = null,
+            )
+        }
+    }
+
+    private suspend fun runPipeline(id: String): Result {
         val recordings = container.recordings
         val rec = recordings.get(id) ?: return Result.failure()
         // Imported files carry the models the user picked on the import sheet as
@@ -232,6 +285,11 @@ class TranscribeWorker(
         const val KEY_RECORDING_ID = "recording_id"
         private const val MAX_ATTEMPTS = 5
         private const val UNIQUE_PREFIX = "transcribe-"
+
+        /** P1-4: shown when the pipeline throws somewhere we didn't anticipate. The
+         *  audio and the transcript-so-far are still in Room, hence "in History". */
+        private const val UNEXPECTED_FAILURE_MESSAGE =
+            "Something went wrong finishing that dictation - it's in History, retry from there."
 
         /** Enqueue a durable transcription job for a finished recording. */
         fun enqueue(context: Context, recordingId: String) {

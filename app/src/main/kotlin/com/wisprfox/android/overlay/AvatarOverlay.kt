@@ -46,6 +46,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -63,7 +64,11 @@ import kotlinx.coroutines.delay
 
 private val FOX_SIZE = 70.dp     // ~15% bigger than the previous 58/54.
 private val FOX_IMG = 66.dp
-private val MENU_WIDTH = 92.dp   // pills sized so the column width ≈ Foxy → no horizontal drift.
+// P0-2: this is WIDER than the fox at every scale (fox = 56/70/87.5dp at S/M/L), so
+// the column genuinely does grow sideways when the menu opens. The fox is held still
+// by re-deriving the window's x from its centre — see [OverlayAnchor] — not by any
+// coincidence of pill sizing.
+private val MENU_WIDTH = 92.dp
 
 /**
  * The floating avatar. Single tap = start/stop (toggle). Long-press = haptic +
@@ -82,6 +87,12 @@ fun AvatarOverlay(
     onOpenApp: () -> Unit,
     /** S/M/L overlay-size multiplier (P-3). 1.0 = the classic footprint. */
     scale: Float = 1f,
+    /**
+     * P0-2: reports the column's width and the fox's own width in px whenever either
+     * changes. [OverlayService] needs both to keep the fox's centre pinned as the
+     * window widens around it (menu, bubble, and the bubble's live label text).
+     */
+    onAnchorMetrics: (contentWidthPx: Int, foxWidthPx: Int) -> Unit = { _, _ -> },
 ) {
     val haptics = LocalHapticFeedback.current
     var menuOpen by remember { mutableStateOf(false) }
@@ -120,9 +131,23 @@ fun AvatarOverlay(
         label = "breathe",
     )
 
-    // Column is centred on Foxy; the menu stacks ABOVE with a width ≈ Foxy, so
-    // opening it grows the window upward (not sideways) and Foxy doesn't move.
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    // P0-2: the menu/bubble stack ABOVE the fox, and Gravity.BOTTOM pins the window's
+    // bottom edge, so upward growth genuinely doesn't move the fox. Sideways growth
+    // does — the column is only as wide as its widest child and the fox is centred in
+    // it — so we report both widths out and [OverlayService] re-derives the window's
+    // x to hold the fox's centre still.
+    var contentWidthPx by remember { mutableIntStateOf(0) }
+    var foxWidthPx by remember { mutableIntStateOf(0) }
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.onSizeChanged {
+            if (it.width != contentWidthPx) {
+                contentWidthPx = it.width
+                if (foxWidthPx > 0) onAnchorMetrics(contentWidthPx, foxWidthPx)
+            }
+        },
+    ) {
 
         AnimatedVisibility(
             visible = menuOpen,
@@ -173,6 +198,15 @@ fun AvatarOverlay(
         Box(
             modifier = Modifier
                 .size(foxSize)
+                // P0-2: measured, not derived from FOX_SIZE * scale * density, so the
+                // anchor can't drift out of sync with whatever the layout actually did.
+                // Read before .scale() so the breathing animation doesn't wobble it.
+                .onSizeChanged {
+                    if (it.width != foxWidthPx) {
+                        foxWidthPx = it.width
+                        if (contentWidthPx > 0) onAnchorMetrics(contentWidthPx, foxWidthPx)
+                    }
+                }
                 .scale(breathe)
                 .semantics {
                     role = Role.Button

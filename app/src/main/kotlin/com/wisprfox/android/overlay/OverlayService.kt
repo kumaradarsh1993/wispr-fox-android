@@ -56,6 +56,15 @@ class OverlayService : Service() {
     private lateinit var prefs: android.content.SharedPreferences
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
+    /**
+     * P0-2: the persisted anchor is the FOX's centre-X, not the window's left edge.
+     * [UNSET] until the first layout tells us how wide the fox is (needed to migrate
+     * the legacy `bx` pref). See [OverlayAnchor] for why.
+     */
+    private var foxCenterX: Int = UNSET
+    private var contentWidthPx: Int = 0
+    private var foxWidthPx: Int = 0
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -130,11 +139,15 @@ class OverlayService : Service() {
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT,
         ).apply {
-            // BOTTOM-anchored: the fox is the bottom-most element, so the
-            // bubble + long-press menu expand UPWARD and the fox never moves.
+            // BOTTOM-anchored: the fox is the bottom-most element, so the bubble +
+            // long-press menu expand UPWARD and the fox never moves vertically.
+            // Horizontally it's the opposite — x pins the window's LEFT EDGE while the
+            // window's width tracks its widest child — so x is re-derived from the
+            // fox's centre on every size change (P0-2, see [applyAnchor]). This seeds
+            // the legacy value only for the frame before the first layout lands.
             gravity = Gravity.BOTTOM or Gravity.START
-            x = prefs.getInt("bx", 24)   // distance from left
-            y = prefs.getInt("by", 320)  // distance from bottom
+            x = prefs.getInt(KEY_LEGACY_LEFT_X, DEFAULT_LEFT_X)
+            y = prefs.getInt(KEY_BOTTOM_Y, DEFAULT_BOTTOM_Y)
         }
 
         val viewOwner = OverlayViewOwner().also { owner = it }
@@ -169,14 +182,19 @@ class OverlayService : Service() {
                         // Refresh the grace window so the fox doesn't vanish
                         // mid-drag when a11y is off (RC-1.1).
                         AppState.markInteraction(SystemClock.elapsedRealtime())
-                        params.x = (params.x + dx.toInt()).coerceAtLeast(0)
+                        // P0-2: drag moves the ANCHOR (the fox's centre); the window's
+                        // left edge follows from it in applyAnchor().
+                        if (foxCenterX != UNSET) foxCenterX += dx.toInt()
                         // BOTTOM gravity: dragging down lowers the window, i.e.
                         // reduces its distance-from-bottom.
                         params.y = (params.y - dy.toInt()).coerceAtLeast(0)
-                        windowManager.updateViewLayout(this, params)
+                        applyAnchor()
                     },
                     onDragEnd = {
-                        prefs.edit().putInt("bx", params.x).putInt("by", params.y).apply()
+                        prefs.edit()
+                            .putInt(KEY_FOX_CENTER_X, foxCenterX)
+                            .putInt(KEY_BOTTOM_Y, params.y)
+                            .apply()
                     },
                     onOpenApp = {
                         startActivity(
@@ -185,6 +203,7 @@ class OverlayService : Service() {
                         )
                     },
                     scale = avatarScale.multiplier,
+                    onAnchorMetrics = ::onAnchorMetrics,
                 )
                 }
             }
@@ -208,6 +227,38 @@ class OverlayService : Service() {
         viewOwner.onResume()
     }
 
+    /**
+     * P0-2: called on every layout where the column's width or the fox's width
+     * changed — i.e. exactly when the menu opens/closes, the bubble appears/vanishes,
+     * the bubble's live label steps to a longer string, or the user switches avatar
+     * scale. Each of those used to shove the centred fox sideways.
+     */
+    private fun onAnchorMetrics(contentWidth: Int, foxWidth: Int) {
+        contentWidthPx = contentWidth
+        foxWidthPx = foxWidth
+        if (foxCenterX == UNSET) {
+            foxCenterX = prefs.getInt(KEY_FOX_CENTER_X, UNSET).takeIf { it != UNSET }
+                // First run after the upgrade: the old pref was the window's left
+                // edge, which (fox-only column) was the fox's left edge.
+                ?: OverlayAnchor.migrateCenterX(prefs.getInt(KEY_LEGACY_LEFT_X, DEFAULT_LEFT_X), foxWidth)
+        }
+        applyAnchor()
+    }
+
+    /** Re-derive the window's left edge so the fox's centre stays exactly on [foxCenterX]. */
+    private fun applyAnchor() {
+        val view = composeView ?: return
+        if (contentWidthPx > 0 && foxWidthPx > 0 && foxCenterX != UNSET) {
+            foxCenterX = OverlayAnchor.clampCenterX(foxCenterX, foxWidthPx, screenWidthPx())
+            params.x = OverlayAnchor.windowLeftX(foxCenterX, contentWidthPx)
+        }
+        // onSizeChanged fires from inside the layout pass; calling updateViewLayout
+        // there re-enters layout, so hand it to the next frame instead.
+        view.post { runCatching { windowManager.updateViewLayout(view, params) } }
+    }
+
+    private fun screenWidthPx(): Int = windowManager.currentWindowMetrics.bounds.width()
+
     override fun onDestroy() {
         serviceScope.cancel()
         owner?.onDestroy()
@@ -224,6 +275,18 @@ class OverlayService : Service() {
          * negligible for battery (the overlay process is already resident).
          */
         const val TICK_MS = 1_000L
+
+        /** Sentinel for "we haven't resolved the fox's centre yet" (a real centre is >= 0). */
+        const val UNSET = -1
+
+        /** P0-2 anchor: the fox's centre-X, in px from the left screen edge. */
+        const val KEY_FOX_CENTER_X = "fcx"
+
+        /** Pre-P0-2 anchor: the overlay WINDOW's left edge. Read once, to migrate. */
+        const val KEY_LEGACY_LEFT_X = "bx"
+        const val KEY_BOTTOM_Y = "by"
+        const val DEFAULT_LEFT_X = 24
+        const val DEFAULT_BOTTOM_Y = 320
     }
 }
 

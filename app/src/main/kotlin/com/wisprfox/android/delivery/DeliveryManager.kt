@@ -24,8 +24,10 @@ import kotlinx.coroutines.delay
  *     auto-paste is off / no field is focused, the user just long-presses paste.
  *
  * Reliability hardening (`docs/AUDIT_2026-07-06_FABLE.md`):
- *  - RC-2.2: paste is retried a few times over ~1.5s before giving up, because
- *    focus is frequently transitioning at the instant delivery fires.
+ *  - RC-2.2 / P0-4 #4: paste is retried on a ladder reaching ~1.4s before giving up,
+ *    because focus is frequently transitioning at the instant delivery fires.
+ *  - P0-4 #1: [Channel.ACCESSIBILITY] is only returned when the text was verified to
+ *    have landed. It's what the user is shown as "Pasted", so it must not be a guess.
  *  - RC-2.3: the cross-app package guard lives in [DeliveryDecision]; a null
  *    current-focus read no longer trips it — the retry loop resolves it.
  *  - RC-2.4: when we fall back to clipboard-only and the app isn't foreground,
@@ -68,24 +70,34 @@ class DeliveryManager(context: Context) {
     }
 
     /**
-     * RC-2.2 + RC-2.3: retry the paste up to [PASTE_ATTEMPTS] times over
-     * ~1.5s (delays after the first attempt: 300/600/900ms). Between attempts
-     * we re-read focus fresh: if focus was momentarily null/mismatched because
+     * RC-2.2 + RC-2.3: retry the paste on the [PASTE_RETRY_DELAYS_MS] ladder. Between
+     * attempts we re-read focus fresh: if focus was momentarily null/mismatched because
      * the user was switching back to the chat, a later attempt catches it.
      * Once a concrete DIFFERENT package is seen we stop — that's a genuine
      * cross-app mismatch, not a transient, and pasting would be unsafe.
+     *
+     * P0-4 #4: the first attempt now waits too. It used to fire the instant
+     * [copyToClipboard] returned, with the recording UI still tearing down, the IME
+     * re-attaching and the clipboard service round-trip still in flight — i.e. the
+     * attempt most likely to be needed was the one given the least chance to work.
      */
     private suspend fun attemptPasteWithRetry(text: String, expectedPackage: String?): Boolean {
-        for (attempt in 0 until PASTE_ATTEMPTS) {
-            if (attempt > 0) delay(PASTE_RETRY_STEP_MS)
+        for (delayMs in PASTE_RETRY_DELAYS_MS) {
+            delay(delayMs)
 
             val currentPackage = WisprFoxAccessibilityService.currentEditablePackage()
             if (expectedPackage != null && currentPackage != null && currentPackage != expectedPackage) {
                 // Focus has settled onto a different app — stop, fall to clipboard.
                 return false
             }
-            if (WisprFoxAccessibilityService.tryPaste(text, clipboardFallbackReady = true)) {
-                return true
+            when (WisprFoxAccessibilityService.tryPaste(text, clipboardFallbackReady = true)) {
+                WisprFoxAccessibilityService.PasteResult.LANDED -> return true
+                // P0-4 #1: the action may have landed in a field we can't read back.
+                // Retrying would risk pasting twice, so stop and let the clipboard +
+                // notification path carry it. Under-claiming beats duplicating text.
+                WisprFoxAccessibilityService.PasteResult.UNVERIFIED -> return false
+                // No field yet, or a verified no-op. Both are worth another go.
+                WisprFoxAccessibilityService.PasteResult.FAILED -> Unit
             }
         }
         return false
@@ -161,9 +173,13 @@ class DeliveryManager(context: Context) {
     }
 
     companion object {
-        /** RC-2.2: 4 attempts at 0/300/600/900ms ≈ 1.5s total window. */
-        const val PASTE_ATTEMPTS = 4
-        const val PASTE_RETRY_STEP_MS = 300L
+        /**
+         * RC-2.2 / P0-4 #4: delay BEFORE each attempt, so attempts land at
+         * 150/400/800/1400ms — a ~1.4s window that opens with a settle rather than
+         * firing instantly. (The previous ladder was documented as ~1.5s but was
+         * 0/300/600/900ms: no settle at all, and 900ms of reach, not 1500.)
+         */
+        val PASTE_RETRY_DELAYS_MS = longArrayOf(150, 250, 400, 600)
 
         const val CHANNEL_ID = "delivery"
         private const val NOTIF_ID = 2001

@@ -17,6 +17,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Opt-in (default-on, since we sideload) auto-paste. When connected, it can
@@ -38,6 +39,13 @@ import kotlinx.coroutines.launch
  *    not the flaky rootInActiveWindow.
  *  - RC-2.2: the paste itself is retried by [DeliveryManager]; each attempt
  *    re-reads focus fresh here.
+ *
+ * Auto-paste hardening (`docs/AUDIT_2026-07-17_ANDROID.md`):
+ *  - P0-4 #1: a paste is only reported as delivered once the text is read back out
+ *    of the node. performAction()'s return value means "handled", not "worked".
+ *  - P0-4 #2: all node access is marshalled onto the service's main thread.
+ *  - P0-4 #3: ACTION_PASTE is preferred over ACTION_SET_TEXT so the app's
+ *    InputConnection sees the edit.
  */
 class WisprFoxAccessibilityService : AccessibilityService() {
 
@@ -154,51 +162,93 @@ class WisprFoxAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Try to insert [text] into the focused editable field. Returns true on
-     * success.
+     * The field's real text, with the hint stripped.
      *
-     * Key subtlety: an EMPTY field reports its placeholder/hint (e.g. WhatsApp's
-     * "Message") as `node.text`. If we naively appended to that, the hint string
-     * leaked into the output ("Messagehello…"). So we detect the hint via
-     * [AccessibilityNodeInfo.isShowingHintText] / a text==hint match and treat
-     * the field as empty.
-     *
-     * Empty field → ACTION_SET_TEXT with just our text. Non-empty → ACTION_PASTE
-     * so we insert at the cursor without clobbering or reordering existing text.
+     * An EMPTY field reports its placeholder/hint (e.g. WhatsApp's "Message") as
+     * `node.text`. If we naively appended to that, the hint string leaked into the
+     * output ("Messagehello…"). So we detect the hint via
+     * [AccessibilityNodeInfo.isShowingHintText] / a text==hint match and treat the
+     * field as empty.
      */
-    private fun pasteInternal(text: String, clipboardFallbackReady: Boolean): Boolean {
-        val node = focusedEditable() ?: return false
-
+    private fun realText(node: AccessibilityNodeInfo): String {
         val rawText = node.text?.toString()
         val hint = node.hintText?.toString()
         val showingHint = node.isShowingHintText || (hint != null && rawText == hint)
-        val existing = if (showingHint || rawText == null) "" else rawText
+        return if (showingHint || rawText == null) "" else rawText
+    }
 
-        if (existing.isEmpty()) {
-            val setArgs = Bundle().apply {
-                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
-            }
-            if (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, setArgs)) {
-                setCursorEnd(node, text.length)
-                return true
-            }
-        } else {
-            // Insert at the cursor, preserving what's already typed.
-            if (clipboardFallbackReady && node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
-                return true
-            }
-            // Fallback: append via SET_TEXT.
-            val combined = existing + text
-            val setArgs = Bundle().apply {
-                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, combined)
-            }
-            if (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, setArgs)) {
-                setCursorEnd(node, combined.length)
-                return true
+    /**
+     * Try to insert [text] into the focused editable field.
+     *
+     * P0-4 #3: ACTION_PASTE is now preferred in BOTH branches. It goes through the
+     * app's InputConnection, so IME/TextWatcher-driven UI wakes up — WhatsApp's and
+     * Telegram's send buttons are the classic casualties of ACTION_SET_TEXT, which
+     * writes the editable directly and leaves the app thinking nothing was typed.
+     * SET_TEXT survives as the fallback for fields that don't advertise ACTION_PASTE
+     * (and for a paste that verifiably no-opped).
+     *
+     * P0-4 #1: neither action's `true` return is trusted. It only means the view
+     * handled the action; the text is only reported as delivered once we can read it
+     * back out of the node. See [PasteVerification].
+     *
+     * Must run on the service's main thread — see [tryPaste].
+     */
+    private suspend fun pasteInternal(text: String, clipboardFallbackReady: Boolean): PasteResult {
+        val node = focusedEditable() ?: return PasteResult.FAILED
+        val before = realText(node)
+
+        if (clipboardFallbackReady && node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_PASTE }) {
+            if (runCatching { node.performAction(AccessibilityNodeInfo.ACTION_PASTE) }.getOrDefault(false)) {
+                when (verifyLanded(node, before, text)) {
+                    PasteVerification.Outcome.LANDED -> return PasteResult.LANDED
+                    PasteVerification.Outcome.UNKNOWN -> return PasteResult.UNVERIFIED
+                    // Accepted and did nothing — the SET_TEXT path is exactly what
+                    // this fallback is for.
+                    PasteVerification.Outcome.NOT_LANDED -> Unit
+                }
             }
         }
 
-        return clipboardFallbackReady && node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+        // Append rather than replace: `before` is hint-stripped, so an empty field
+        // gets just our text and a half-typed one keeps what's there.
+        val combined = before + text
+        val setArgs = Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, combined)
+        }
+        if (runCatching { node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, setArgs) }.getOrDefault(false)) {
+            setCursorEnd(node, combined.length)
+            return when (verifyLanded(node, before, text)) {
+                PasteVerification.Outcome.LANDED -> PasteResult.LANDED
+                PasteVerification.Outcome.NOT_LANDED -> PasteResult.FAILED
+                PasteVerification.Outcome.UNKNOWN -> PasteResult.UNVERIFIED
+            }
+        }
+
+        return PasteResult.FAILED
+    }
+
+    /**
+     * P0-4 #1: read the text back out of the node to see whether the action actually
+     * did anything.
+     *
+     * performAction is a synchronous IPC, but the app applies the edit on its own UI
+     * thread afterwards, so an immediate refresh() reads stale text. Poll instead: a
+     * false "not landed" here is worse than a slow one, because the caller's answer to
+     * NOT_LANDED is to write the text again.
+     */
+    private suspend fun verifyLanded(
+        node: AccessibilityNodeInfo,
+        before: String,
+        inserted: String,
+    ): PasteVerification.Outcome {
+        var outcome = PasteVerification.Outcome.UNKNOWN
+        repeat(VERIFY_READS) {
+            delay(VERIFY_SETTLE_MS)
+            val after = runCatching { if (node.refresh()) realText(node) else null }.getOrNull()
+            outcome = PasteVerification.verify(before, after, inserted)
+            if (outcome == PasteVerification.Outcome.LANDED) return outcome
+        }
+        return outcome
     }
 
     private fun setCursorEnd(node: AccessibilityNodeInfo, end: Int) {
@@ -209,8 +259,27 @@ class WisprFoxAccessibilityService : AccessibilityService() {
         node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, selArgs)
     }
 
+    /** Outcome of one auto-paste attempt. See [PasteVerification] for why this is a
+     *  tri-state rather than a Boolean (P0-4 #1). */
+    enum class PasteResult {
+        /** The text is verifiably in the field. Safe to report "Pasted". */
+        LANDED,
+
+        /** No field, or the action was rejected / verifiably no-opped. Retrying is safe. */
+        FAILED,
+
+        /** The action may or may not have landed and we can't read the field back.
+         *  Retrying could double-paste, so the caller must stop and fall back. */
+        UNVERIFIED,
+    }
+
     companion object {
         private const val KEYBOARD_RECHECK_MS = 600L
+
+        /** P0-4 #1: up to 3 × 60ms ≈ 180ms for the app's UI thread to apply the edit
+         *  before we conclude the action no-opped. */
+        private const val VERIFY_SETTLE_MS = 60L
+        private const val VERIFY_READS = 3
 
         @Volatile
         private var instance: WisprFoxAccessibilityService? = null
@@ -218,17 +287,31 @@ class WisprFoxAccessibilityService : AccessibilityService() {
         /** Whether the service is currently connected (user enabled it). */
         fun isConnected(): Boolean = instance != null
 
-        /** Package name of the currently focused editable field, when known. */
-        fun currentEditablePackage(): String? =
+        /**
+         * Package name of the currently focused editable field, when known.
+         *
+         * P0-4 #2: node reads MUST happen on the service's main thread. The framework's
+         * AccessibilityInteractionClient caches per-thread and refreshes its
+         * window/node snapshots on the service's main looper, so an off-thread
+         * findFocus/getWindows can see stale or empty state non-deterministically —
+         * and every caller of this used to be on Dispatchers.Default or a WorkManager
+         * executor.
+         */
+        suspend fun currentEditablePackage(): String? = withContext(Dispatchers.Main) {
             instance?.focusedEditable()?.packageName?.toString()
+        }
 
         /**
          * Attempt auto-paste from any context. [clipboardFallbackReady] should
          * be true if the caller has already put [text] on the clipboard so the
-         * ACTION_PASTE fallback works. Each call re-reads focus fresh, so the
+         * ACTION_PASTE path works. Each call re-reads focus fresh, so the
          * caller's retry loop (RC-2.2) can resolve a transitioning focus.
+         *
+         * P0-4 #2: hops to the service's main thread — see [currentEditablePackage].
          */
-        fun tryPaste(text: String, clipboardFallbackReady: Boolean): Boolean =
-            instance?.pasteInternal(text, clipboardFallbackReady) ?: false
+        suspend fun tryPaste(text: String, clipboardFallbackReady: Boolean): PasteResult =
+            withContext(Dispatchers.Main) {
+                instance?.pasteInternal(text, clipboardFallbackReady) ?: PasteResult.FAILED
+            }
     }
 }
