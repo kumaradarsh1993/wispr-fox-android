@@ -38,14 +38,16 @@ import java.util.TimeZone
  * else shows the number only (empty track), the desktop rule.
  */
 
-private val METER_OK = Color(0xFF6CB16D)
-private val METER_WARN = Color(0xFFE0A63A)
-private val METER_DANGER = Color(0xFFCF5B4E)
-
+/**
+ * Band colours come from the theme now, not from file-private constants. The old
+ * hard-coded trio was light-mode-only and would have stayed light-mode green on
+ * the dark surface (audit P2, "hardcoded colours bypass the theme").
+ */
+@Composable
 private fun bandColor(band: UsageMath.Band): Color = when (band) {
-    UsageMath.Band.OK -> METER_OK
-    UsageMath.Band.WARN -> METER_WARN
-    UsageMath.Band.DANGER -> METER_DANGER
+    UsageMath.Band.OK -> MaterialTheme.foxColors.success
+    UsageMath.Band.WARN -> MaterialTheme.foxColors.warning
+    UsageMath.Band.DANGER -> MaterialTheme.foxColors.danger
 }
 
 /**
@@ -79,7 +81,7 @@ fun rememberUsageSnapshot(settings: AppSettings): UsageSnapshot? {
 /** Compact single-column usage strip for the Home screen. */
 @Composable
 fun UsageStrip(snapshot: UsageSnapshot, modifier: Modifier = Modifier) {
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Space.sm)) {
         UsageMeterRow("Speech", snapshot.stt)
         UsageMeterRow("Cleanup", snapshot.llm)
         Text(
@@ -93,13 +95,13 @@ fun UsageStrip(snapshot: UsageSnapshot, modifier: Modifier = Modifier) {
 /** One meter row: caption + provider/model + value, and a bar when metered. */
 @Composable
 fun UsageMeterRow(caption: String, line: UsageLine) {
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 caption,
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(end = 8.dp),
+                modifier = Modifier.padding(end = Space.sm),
             )
             Text(
                 "${ProviderCatalog.label(line.provider)} · ${ProviderCatalog.shortModel(line.model)}",

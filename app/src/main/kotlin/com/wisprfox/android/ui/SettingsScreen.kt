@@ -1,324 +1,185 @@
 package com.wisprfox.android.ui
 
-import android.content.Intent
-import android.net.Uri
-import android.provider.Settings
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Insights
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Pets
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.wisprfox.android.BuildConfig
 import com.wisprfox.android.WisprFoxApp
-import com.wisprfox.android.core.PipelineState
-import com.wisprfox.android.overlay.AvatarView
-import com.wisprfox.android.provider.DictationMode
+import com.wisprfox.android.delivery.WisprFoxAccessibilityService
 import com.wisprfox.android.provider.ProviderCatalog
 import com.wisprfox.android.settings.AppSettings
-import com.wisprfox.android.settings.Avatar
-import com.wisprfox.android.settings.AvatarScale
-import com.wisprfox.android.settings.SecureKeyStore
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import com.wisprfox.android.sync.SupabaseConfig
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+/**
+ * Settings — a **hub**, not a scroll (audit P0-3).
+ *
+ * What this replaced: a single 130-line `Column(verticalScroll)` holding 16
+ * groups separated by dividers — ~2,400dp of it — with seven API-key fields on
+ * screen at once and an invented "Delivery & avatar" category merging four
+ * unrelated concerns. It wasn't designed; it was appended to.
+ *
+ * Why hub-and-spoke and not tabs: M3 tabs are for switching between *peer
+ * content* of the same kind, and Account and Avatar Size are not peers. One UI's
+ * own Settings app uses zero tabs anywhere, and tabs would cap us around 4–5
+ * groups when we have 8. A list of rows opening large-title sub-pages is the
+ * convention the muscle memory already has.
+ *
+ * Each row carries a **summary of its current value**, so the hub answers
+ * questions ("what model am I on?") rather than just being a menu. Eight rows at
+ * ~76dp fits one screen with no scrolling.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onReplayOnboarding: () -> Unit = {}) {
+fun SettingsScreen(
+    onBack: () -> Unit,
+    onOpenSpoke: (SettingsSpoke) -> Unit,
+) {
     val ctx = LocalContext.current
     val container = remember { WisprFoxApp.container(ctx) }
-    val scope = rememberCoroutineScope()
     val settings by container.settingsStore.settings.collectAsState(initial = AppSettings())
+    val authState by container.authManager.state.collectAsState()
+
+    // Accessibility state is read live and refreshed on ON_RESUME so the Delivery
+    // summary is right the moment the user returns from the system page.
+    var permTick by remember { mutableIntStateOf(0) }
+    val owner = LocalLifecycleOwner.current
+    DisposableEffect(owner) {
+        val obs = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_RESUME) permTick++ }
+        owner.lifecycle.addObserver(obs)
+        onDispose { owner.lifecycle.removeObserver(obs) }
+    }
+    val a11yOn = remember(permTick) { WisprFoxAccessibilityService.isConnected() }
+
+    val usage = rememberUsageSnapshot(settings)
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            TopAppBar(
+            LargeTopAppBar(
                 title = { Text("Settings") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
+                colors = TopAppBarDefaults.largeTopAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    scrolledContainerColor = MaterialTheme.colorScheme.background,
+                ),
+                scrollBehavior = scrollBehavior,
             )
         },
     ) { inner ->
-        Column(
-            Modifier.fillMaxSize().padding(inner).verticalScroll(rememberScrollState()).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            SectionTitle("Speech-to-text")
-            Text("Pick the service that hears you best. Groq stays the default for existing installs.", style = MaterialTheme.typography.bodySmall)
-            ProviderChipRow(
-                options = ProviderCatalog.sttProviders,
-                selected = settings.sttProvider,
-                onSelect = { scope.launch { container.settingsStore.setSttProvider(it) } },
+        ScreenColumn(Modifier.padding(inner), gap = Space.listGap) {
+            SettingsRow(
+                icon = Icons.Filled.Mic,
+                title = "Transcription",
+                summary = "${ProviderCatalog.label(settings.sttProvider)} · ${ProviderCatalog.shortModel(settings.sttModel)}",
+                onClick = { onOpenSpoke(SettingsSpoke.TRANSCRIPTION) },
             )
-            ModelChipRow(
-                options = ProviderCatalog.sttModelsFor(settings.sttProvider),
-                selected = settings.sttModel,
-                onSelect = { scope.launch { container.settingsStore.setSttModel(it) } },
+            SettingsRow(
+                icon = Icons.Filled.AutoAwesome,
+                title = "Cleanup & modes",
+                summary = "${settings.defaultMode.label} · ${ProviderCatalog.shortModel(settings.activeLlmModel)} on ${ProviderCatalog.label(settings.llmProvider)}",
+                onClick = { onOpenSpoke(SettingsSpoke.CLEANUP) },
             )
-            KeyField("Groq STT key", SecureKeyStore.Key.GroqStt, container.secrets)
-            KeyField("OpenAI key", SecureKeyStore.Key.OpenAiStt, container.secrets)
-            KeyField("Deepgram key", SecureKeyStore.Key.DeepgramStt, container.secrets)
-            KeyField("ElevenLabs key", SecureKeyStore.Key.ElevenLabsStt, container.secrets)
-
-            HorizontalDivider()
-            SectionTitle("Cleanup")
-            Text("Raw mode skips cleanup. Clean and Draft use the provider/model here.", style = MaterialTheme.typography.bodySmall)
-            ProviderChipRow(
-                options = ProviderCatalog.llmProviders,
-                selected = settings.llmProvider,
-                onSelect = { scope.launch { container.settingsStore.setLlmProvider(it) } },
-            )
-            ModelChipRow(
-                options = ProviderCatalog.llmModelsFor(settings.llmProvider),
-                selected = settings.activeLlmModel,
-                onSelect = { model ->
-                    scope.launch {
-                        when (settings.llmProvider) {
-                            AppSettings.PROVIDER_OPENAI -> container.settingsStore.setOpenAiLlmModel(model)
-                            AppSettings.PROVIDER_GEMINI -> container.settingsStore.setGeminiModel(model)
-                            else -> container.settingsStore.setGroqLlmModel(model)
-                        }
-                    }
+            SettingsRow(
+                icon = Icons.Filled.Pets,
+                title = "Foxy",
+                summary = buildString {
+                    append(avatarLabel(settings.avatar))
+                    append(" · ")
+                    append(settings.avatarScale.label)
+                    append(" · ")
+                    append(if (settings.overlayBubbleEnabled) "Floating on" else "Floating off")
                 },
+                onClick = { onOpenSpoke(SettingsSpoke.FOXY) },
             )
-            KeyField("Groq cleanup key (optional)", SecureKeyStore.Key.GroqLlm, container.secrets)
-            KeyField("OpenAI cleanup key", SecureKeyStore.Key.OpenAiLlm, container.secrets)
-            KeyField("Gemini cleanup key", SecureKeyStore.Key.GeminiLlm, container.secrets)
-
-            HorizontalDivider()
-            SectionTitle("Usage today")
-            Text(
-                "Free-tier meters for the provider you're using. Groq and Deepgram show a bar; other providers show the raw count.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            val usage = rememberUsageSnapshot(settings)
-            if (usage != null) {
-                UsageMeterRow("Speech-to-text", usage.stt)
-                UsageMeterRow("Cleanup", usage.llm)
-                Text(usage.resetLabel, style = MaterialTheme.typography.labelSmall)
-            }
-
-            HorizontalDivider()
-            SectionTitle("Default tap mode")
-            Text("What a single tap on the fox does. Long-press always offers all three.", style = MaterialTheme.typography.bodySmall)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ModeOption("Raw", DictationMode.RAW, settings.defaultMode) { scope.launch { container.settingsStore.setDefaultMode(it) } }
-                ModeOption("Clean", DictationMode.CLEANED, settings.defaultMode) { scope.launch { container.settingsStore.setDefaultMode(it) } }
-                ModeOption("Draft", DictationMode.REFORMATTED, settings.defaultMode) { scope.launch { container.settingsStore.setDefaultMode(it) } }
-            }
-
-            HorizontalDivider()
-            SectionTitle("Delivery & avatar")
-            ToggleRow("Auto-paste into the focused field", settings.autoPasteEnabled) {
-                scope.launch { container.settingsStore.setAutoPaste(it) }
-            }
-            ToggleRow("Show floating fox avatar", settings.overlayBubbleEnabled) {
-                scope.launch { container.settingsStore.setOverlayBubble(it) }
-            }
-
-            // Avatar picker (P-3): each option shows a mini preview.
-            Text("Avatar", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-            AvatarPickerRow(
-                selected = settings.avatar,
-                onSelect = { scope.launch { container.settingsStore.setAvatar(it) } },
-            )
-            // Size preset (S/M/L) for the floating avatar.
-            Text("Avatar size", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AvatarScale.entries.forEach { s ->
-                    FilterChip(
-                        selected = settings.avatarScale == s,
-                        onClick = { scope.launch { container.settingsStore.setAvatarScale(s) } },
-                        label = { Text(s.label) },
-                    )
-                }
-            }
-            ToggleRow("Haptics on long-press", settings.hapticsEnabled) {
-                scope.launch { container.settingsStore.setHaptics(it) }
-            }
-            OutlinedButton(
-                onClick = { ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Open Accessibility settings (auto-paste)") }
-            OutlinedButton(
-                onClick = {
-                    ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")))
+            SettingsRow(
+                icon = Icons.Filled.ContentPaste,
+                title = "Delivery",
+                summary = buildString {
+                    append(if (settings.autoPasteEnabled) "Auto-paste on" else "Auto-paste off")
+                    append(" · ")
+                    append(if (a11yOn) "Accessibility on" else "Accessibility off")
                 },
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Allow overlay (floating fox)") }
-
-            HorizontalDivider()
-            SectionTitle("Retention")
-            var days by remember(settings.retentionDays) { mutableStateOf(settings.retentionDays.toFloat()) }
-            Text("Keep audio for ${days.toInt()} days")
-            Slider(
-                value = days, onValueChange = { days = it },
-                onValueChangeFinished = { scope.launch { container.settingsStore.setRetentionDays(days.toInt()) } },
-                valueRange = 0f..30f, steps = 29,
+                onClick = { onOpenSpoke(SettingsSpoke.DELIVERY) },
             )
-            var cap by remember(settings.retentionMaxMb) { mutableStateOf(settings.retentionMaxMb.toFloat()) }
-            Text("Storage cap: ${cap.toInt()} MB")
-            Slider(
-                value = cap, onValueChange = { cap = it },
-                onValueChangeFinished = { scope.launch { container.settingsStore.setRetentionMaxMb(cap.toInt()) } },
-                valueRange = 100f..1000f, steps = 17,
+            SettingsRow(
+                icon = Icons.Filled.Insights,
+                title = "Usage",
+                summary = usage?.let { "${it.stt.label} speech · ${it.llm.label} cleanup today" }
+                    ?: "Today's free-tier meters",
+                onClick = { onOpenSpoke(SettingsSpoke.USAGE) },
             )
-
-            HorizontalDivider()
-            SectionTitle("Account")
-            AccountSection(container)
-
-            HorizontalDivider()
-            SectionTitle("About")
-            Text("wispr-fox for Android - bring-your-own-key dictation. Audio is sent only to the provider you choose for that request; keys stay encrypted on this phone.", style = MaterialTheme.typography.bodySmall)
-            OutlinedButton(onClick = onReplayOnboarding, modifier = Modifier.fillMaxWidth()) {
-                Text("Replay setup guide")
+            SettingsRow(
+                icon = Icons.Filled.Storage,
+                title = "Storage",
+                summary = "Keep ${settings.retentionDays} days · ${settings.retentionMaxMb} MB cap",
+                onClick = { onOpenSpoke(SettingsSpoke.STORAGE) },
+            )
+            // Mirrors onboarding's gate: an unconfigured build has no account
+            // feature at all, so the row would open an empty page.
+            if (SupabaseConfig.isConfigured()) {
+                SettingsRow(
+                    icon = Icons.Filled.CloudSync,
+                    title = "Account",
+                    summary = authState.email ?: "Not signed in · sync across devices",
+                    onClick = { onOpenSpoke(SettingsSpoke.ACCOUNT) },
+                )
             }
-        }
-    }
-}
-
-@Composable
-private fun SectionTitle(text: String) =
-    Text(text, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-
-/**
- * Avatar picker (P-3): fox, black clippy, the Oru & Gujia cats (raster
- * thumbnail), and the Siri-style orb (mini live orb). A selected chip gets a
- * primary-coloured border.
- */
-@Composable
-private fun AvatarPickerRow(selected: Avatar, onSelect: (Avatar) -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        AvatarPickerChip(Avatar.FOX, selected, onSelect) {
-            AvatarView(Avatar.FOX, PipelineState.IDLE, Modifier.size(40.dp))
-        }
-        AvatarPickerChip(Avatar.CLIPPY, selected, onSelect) {
-            AvatarView(Avatar.CLIPPY, PipelineState.IDLE, Modifier.size(40.dp))
-        }
-        AvatarPickerChip(Avatar.ORU_GUJIA, selected, onSelect) {
-            Image(painterResource(com.wisprfox.android.R.drawable.oru_gujia_thumbnail), null, Modifier.size(40.dp))
-        }
-        AvatarPickerChip(Avatar.SIRI, selected, onSelect) {
-            AvatarView(Avatar.SIRI, PipelineState.IDLE, Modifier.size(40.dp))
-        }
-    }
-}
-
-@Composable
-private fun AvatarPickerChip(
-    avatar: Avatar,
-    selected: Avatar,
-    onSelect: (Avatar) -> Unit,
-    content: @Composable () -> Unit,
-) {
-    val isSel = selected == avatar
-    val border = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
-    Box(
-        modifier = Modifier
-            .size(56.dp)
-            .border(2.dp, border, RoundedCornerShape(14.dp))
-            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp))
-            .clickable { onSelect(avatar) },
-        contentAlignment = androidx.compose.ui.Alignment.Center,
-    ) { content() }
-}
-
-@Composable
-private fun ModeOption(label: String, mode: DictationMode, current: DictationMode, onSelect: (DictationMode) -> Unit) {
-    FilterChip(selected = current == mode, onClick = { onSelect(mode) }, label = { Text(label) })
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun ProviderChipRow(
-    options: List<ProviderCatalog.ProviderOption>,
-    selected: String,
-    onSelect: (String) -> Unit,
-) {
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        options.forEach { option ->
-            FilterChip(
-                selected = selected == option.id,
-                onClick = { onSelect(option.id) },
-                label = { Text("${option.label} · ${option.summary}") },
+            SettingsRow(
+                icon = Icons.Filled.Info,
+                title = "About",
+                summary = "Version ${BuildConfig.VERSION_NAME}",
+                onClick = { onOpenSpoke(SettingsSpoke.ABOUT) },
             )
+            Spacer(Modifier.height(Space.xl))
         }
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun ModelChipRow(
-    options: List<ProviderCatalog.ModelOption>,
-    selected: String,
-    onSelect: (String) -> Unit,
-) {
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        options.forEach { option ->
-            FilterChip(
-                selected = selected == option.id,
-                onClick = { onSelect(option.id) },
-                label = { Text(option.label) },
-            )
-        }
-    }
+/** The spokes the hub can open. Routes live in `MainActivity`'s NavHost. */
+enum class SettingsSpoke(val route: String) {
+    TRANSCRIPTION("settings/transcription"),
+    CLEANUP("settings/cleanup"),
+    FOXY("settings/foxy"),
+    DELIVERY("settings/delivery"),
+    USAGE("settings/usage"),
+    STORAGE("settings/storage"),
+    ACCOUNT("settings/account"),
+    ABOUT("settings/about"),
 }
-
-@Composable
-private fun ToggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f).padding(end = 12.dp))
-        Switch(checked = checked, onCheckedChange = onChange)
-    }
-}
-// KeyField lives in ui/KeyField.kt (shared with Onboarding).

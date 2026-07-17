@@ -2,48 +2,43 @@ package com.wisprfox.android.ui
 
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -57,15 +52,17 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -76,24 +73,40 @@ import com.wisprfox.android.WisprFoxApp
 import com.wisprfox.android.core.AppState
 import com.wisprfox.android.core.ImportConfig
 import com.wisprfox.android.core.PipelineState
-import com.wisprfox.android.delivery.WisprFoxAccessibilityService
 import com.wisprfox.android.history.Recording
 import com.wisprfox.android.overlay.AvatarView
 import com.wisprfox.android.provider.DictationMode
 import com.wisprfox.android.provider.ProviderCatalog
 import com.wisprfox.android.settings.AppSettings
-import com.wisprfox.android.settings.Avatar
 import com.wisprfox.android.settings.SecureKeyStore
+import com.wisprfox.android.ui.settings.ModeSegmented
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.launch
 
-private const val STT_TURBO = "whisper-large-v3-turbo"
 private const val STT_ACCURATE = "whisper-large-v3"
-private val GREEN = Color(0xFF6CB16D)
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+/**
+ * Home — the activation surface.
+ *
+ * What this replaced (audit "Home — cut the hero, promote the content"): up to
+ * two banners saying overlapping things (~180dp), a `StatusPill` reading
+ * "Recording" directly above a hero title reading "Listening…", a 180dp box
+ * holding a 160dp avatar (~22% of the viewport for a decorative element), an
+ * avatar-skin picker sitting next to the record button as though skin choice and
+ * dictation were related, and then *three separate settings cards* duplicating
+ * the Settings screen inline. Home was ~60% settings by area, and Recent — the
+ * only thing on the screen with actual content — got whatever was left.
+ *
+ * The rule now: **Home holds the fox, the one setting that changes per
+ * utterance, and your content.** Everything else is one tap away in Settings.
+ *
+ * Mode is the sole inline setting and it earns that: it's chosen per-utterance,
+ * not configured once. Provider/model collapse to a single read-only summary
+ * line that deep-links to the Transcription spoke.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(onOpenHistory: () -> Unit, onOpenSettings: () -> Unit) {
     val ctx = LocalContext.current
@@ -101,12 +114,13 @@ fun HomeScreen(onOpenHistory: () -> Unit, onOpenSettings: () -> Unit) {
     val scope = rememberCoroutineScope()
     val state by AppState.state.collectAsState()
     val settings by container.settingsStore.settings.collectAsState(initial = AppSettings())
-    val recordings by container.recordings.observeRecent(limit = 3).collectAsState(initial = emptyList())
+    val recordings by container.recordings.observeRecent(limit = 4).collectAsState(initial = emptyList())
     val recording = state.pipeline == PipelineState.RECORDING
 
-    // Permission status is read live and refreshed on each ON_RESUME so the
-    // "Finish setup" banner disappears the moment the user returns from the
-    // system page that granted it.
+    // Overlay + battery can only change out in system settings, so re-read on
+    // ON_RESUME. Accessibility does NOT go through this tick: AppState exposes
+    // it as a live flow (`a11yConnected`), which Home used to ignore in favour
+    // of polling the service singleton — stale between resumes for no reason.
     var permTick by remember { mutableIntStateOf(0) }
     val owner = LocalLifecycleOwner.current
     DisposableEffect(owner) {
@@ -114,13 +128,13 @@ fun HomeScreen(onOpenHistory: () -> Unit, onOpenSettings: () -> Unit) {
         owner.lifecycle.addObserver(obs)
         onDispose { owner.lifecycle.removeObserver(obs) }
     }
-    val missing = remember(permTick) { missingPermissions(ctx) }
+    val missing = remember(permTick, state.a11yConnected) { missingPermissions(ctx, state.a11yConnected) }
 
     // ── Audio-file import ────────────────────────────────────────────────────
     // Defaults per the product ask: Whisper Large v3 on Groq for transcription,
-    // Gemini 3.5 Flash for cleanup. These are the import sheet's own selections
-    // and don't disturb the live-dictation model chosen above.
-    var showImport by remember { mutableStateOf(false) }
+    // Gemini for cleanup. These are the import sheet's own selections and don't
+    // disturb the live-dictation model chosen in Settings.
+    var showImport by rememberSaveable { mutableStateOf(false) }
     var importConfig by remember {
         mutableStateOf(
             ImportConfig(
@@ -140,13 +154,14 @@ fun HomeScreen(onOpenHistory: () -> Unit, onOpenSettings: () -> Unit) {
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Image(painterResource(R.drawable.fox_favicon), null, Modifier.size(26.dp))
-                        Spacer(Modifier.width(8.dp))
+                        Spacer(Modifier.width(Space.sm))
                         Text(
                             buildAnnotatedString {
                                 withStyle(SpanStyle(color = MaterialTheme.colorScheme.onBackground, fontWeight = FontWeight.Bold)) { append("wispr") }
@@ -164,150 +179,88 @@ fun HomeScreen(onOpenHistory: () -> Unit, onOpenSettings: () -> Unit) {
             )
         },
         bottomBar = { WisprBottomBar(NavTab.HOME, onSelect = { if (it == NavTab.HISTORY) onOpenHistory() }) },
+        // The fox is the primary control, but on a 6.8" display it sits well
+        // above the thumb arc. The FAB is the same action at a reachable
+        // position — not a second, competing one.
+        floatingActionButton = {
+            ExtendedFloatingActionButton(
+                onClick = { container.controller.toggle(settings.defaultMode) },
+                containerColor = if (recording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                contentColor = if (recording) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onPrimary,
+                icon = { Icon(if (recording) Icons.Filled.Stop else Icons.Filled.Mic, contentDescription = null) },
+                text = { Text(if (recording) "Stop" else "Speak") },
+            )
+        },
     ) { inner ->
-        Column(
-            Modifier
-                .fillMaxSize()
-                .padding(inner)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ScreenColumn(
+            Modifier.padding(inner),
+            gap = Space.md,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // Setup banner (only when something's not granted). Whole row is
-            // tappable; it deep-links to Settings where the full toggles live.
+            // ONE banner. Previously two fired together saying overlapping
+            // things: missingPermissions() already counts "auto-paste", so the
+            // setup banner said "2 permissions still need to be granted" while a
+            // three-line accessibility paragraph rendered immediately below it —
+            // ~180dp of duplication that pushed the hero below the fold.
             if (missing.isNotEmpty()) {
-                SetupBanner(missing.size) { onOpenSettings() }
+                SetupBanner(missing, onClick = onOpenSettings)
             }
 
-            // Accessibility-off explainer (Task 5 / RC-1.1). Agent A changed the
-            // a11y-off fallback: the floating fox now stays HIDDEN (it used to be
-            // pinned always-visible) and words can't auto-land in the box. Tell
-            // the user why, with a one-tap deep-link to enable it. Read live so
-            // the banner clears the moment they return from the system page.
-            val a11yOff = remember(permTick) { !WisprFoxAccessibilityService.isConnected() }
-            if (a11yOff) {
-                AccessibilityBanner(
-                    onEnable = { ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
-                )
-            }
-
-            // Hero: status pill, tappable avatar, voice prompt.
-            Spacer(Modifier.height(2.dp))
-            StatusPill(state, recording)
+            // Hero. 120dp, not a 160dp avatar inside a 180dp box.
+            Spacer(Modifier.height(Space.xs))
             Box(
-                modifier = Modifier.size(180.dp).clickable { container.controller.toggle(settings.defaultMode) },
+                modifier = Modifier
+                    .size(Sizes.hero)
+                    .clickable(
+                        role = Role.Button,
+                        onClickLabel = if (recording) "Stop recording" else "Start recording",
+                    ) { container.controller.toggle(settings.defaultMode) },
                 contentAlignment = Alignment.Center,
             ) {
-                AvatarView(settings.avatar, state.pipeline, Modifier.size(160.dp))
+                AvatarView(settings.avatar, state.pipeline, Modifier.size(Sizes.hero))
             }
-            Text(heroTitle(state), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+
+            // ONE label. StatusPill ("Recording") used to sit directly above
+            // heroTitle ("Listening…") — two labels, same information, stacked.
+            AnimatedContent(
+                targetState = heroTitle(state),
+                transitionSpec = { fadeIn() togetherWith fadeOut() },
+                label = "hero-title",
+            ) { title ->
+                Text(title, style = MaterialTheme.typography.headlineSmall)
+            }
             Text(
                 heroSubtitle(state),
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (state.messageIsError) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            // Avatar picker + big mic. Four skins now (P-3): fox, black clippy,
-            // the Oru & Gujia cats, and the Siri-style orb — each with a mini
-            // preview. Thumbnail is used for the cat pack (cheap raster preview).
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AvatarChip(
-                        selected = settings.avatar == Avatar.FOX,
-                        onClick = { scope.launch { container.settingsStore.setAvatar(Avatar.FOX) } },
-                    ) { AvatarView(Avatar.FOX, PipelineState.IDLE, Modifier.size(38.dp)) }
-                    AvatarChip(
-                        selected = settings.avatar == Avatar.CLIPPY,
-                        onClick = { scope.launch { container.settingsStore.setAvatar(Avatar.CLIPPY) } },
-                    ) { AvatarView(Avatar.CLIPPY, PipelineState.IDLE, Modifier.size(38.dp)) }
-                    AvatarChip(
-                        selected = settings.avatar == Avatar.ORU_GUJIA,
-                        onClick = { scope.launch { container.settingsStore.setAvatar(Avatar.ORU_GUJIA) } },
-                    ) { Image(painterResource(R.drawable.oru_gujia_thumbnail), null, Modifier.size(38.dp)) }
-                    AvatarChip(
-                        selected = settings.avatar == Avatar.SIRI,
-                        onClick = { scope.launch { container.settingsStore.setAvatar(Avatar.SIRI) } },
-                    ) { AvatarView(Avatar.SIRI, PipelineState.IDLE, Modifier.size(38.dp)) }
-                }
-                Spacer(Modifier.weight(1f))
-                FilledIconButton(
-                    onClick = { container.controller.toggle(settings.defaultMode) },
-                    modifier = Modifier.size(56.dp),
-                    colors = if (recording) IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.error)
-                    else IconButtonDefaults.filledIconButtonColors(),
-                ) {
-                    Icon(if (recording) Icons.Filled.Stop else Icons.Filled.Mic, contentDescription = if (recording) "Stop" else "Record")
-                }
-            }
+            Spacer(Modifier.height(Space.xs))
 
-            SectionCard("Recording style") {
-                ChipRow(
-                    options = listOf(DictationMode.RAW to "Raw", DictationMode.CLEANED to "Clean", DictationMode.REFORMATTED to "Draft"),
-                    selected = settings.defaultMode,
-                    onSelect = { scope.launch { container.settingsStore.setDefaultMode(it) } },
-                )
-            }
+            // The one setting that belongs on Home: it's per-utterance.
+            ModeSegmented(
+                selected = settings.defaultMode,
+                onSelect = { scope.launch { container.settingsStore.setDefaultMode(it) } },
+            )
 
-            SectionCard("Speech-to-text") {
-                Text(
-                    "${ProviderCatalog.label(settings.sttProvider)} · ${ProviderCatalog.shortModel(settings.sttModel)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                ModelFlow(
-                    options = ProviderCatalog.sttModelsFor(settings.sttProvider).map { it.id to it.label },
-                    selected = settings.sttModel,
-                    onSelect = { scope.launch { container.settingsStore.setSttModel(it) } },
-                )
-            }
+            // Replaces the "Speech-to-text" + "Smart cleanup" cards wholesale —
+            // both were settings duplicated onto Home. Read-only summary,
+            // deep-links to where they're actually configured.
+            EngineSummaryRow(settings = settings, onClick = onOpenSettings)
 
-            SectionCard("Smart cleanup") {
-                val geminiReady = container.secrets.has(SecureKeyStore.Key.GeminiLlm)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
-                        selected = settings.llmProvider == AppSettings.PROVIDER_GROQ,
-                        onClick = { scope.launch { container.settingsStore.setLlmProvider(AppSettings.PROVIDER_GROQ) } },
-                        label = { Text("Llama 70B · Groq") },
-                    )
-                    FilterChip(
-                        selected = settings.llmProvider == AppSettings.PROVIDER_OPENAI,
-                        onClick = { scope.launch { container.settingsStore.setLlmProvider(AppSettings.PROVIDER_OPENAI) } },
-                        label = { Text("OpenAI") },
-                    )
-                    FilterChip(
-                        selected = settings.llmProvider == AppSettings.PROVIDER_GEMINI && geminiReady,
-                        enabled = geminiReady,
-                        onClick = { scope.launch { container.settingsStore.setLlmProvider(AppSettings.PROVIDER_GEMINI) } },
-                        label = { Text("Gemini") },
-                    )
-                }
-                if (!geminiReady) {
-                    Text(
-                        "Add a Gemini key in Settings to enable Gemini.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-
-            // Import an existing audio file (voice notes, call recordings) and
-            // run it through the same transcribe → clean/draft pipeline.
-            ImportCard(onClick = { showImport = true })
-
-            // Usage strip (P-2). Today's Speech + Cleanup for the active
-            // provider/model, coloured ok/warn/danger, bars for groq/deepgram.
             val usage = rememberUsageSnapshot(settings)
             if (usage != null) {
-                SectionCard("Usage today") {
-                    UsageStrip(usage)
-                }
+                SectionCard { UsageStrip(usage) }
             }
 
-            // Recents preview (kept on the main screen so it's never more than
-            // a glance away — the bottom-nav History tab opens the full list).
+            // Recent gets the room the hero was wasting.
             RecentsCard(recordings = recordings, onOpenAll = onOpenHistory)
-            Spacer(Modifier.height(4.dp))
+
+            ImportRow(onClick = { showImport = true })
+
+            // Clear the FAB + bottom bar.
+            Spacer(Modifier.height(Space.xxl))
         }
     }
 
@@ -327,59 +280,85 @@ fun HomeScreen(onOpenHistory: () -> Unit, onOpenSettings: () -> Unit) {
 // Samsung and iPhone recordings.
 private val IMPORT_MIME_TYPES = arrayOf("audio/*")
 
+/* ── Engine summary ──────────────────────────────────────────────────────── */
+
+/** "Groq · Whisper Turbo → Llama 70B" — two former cards, one line. */
 @Composable
-private fun ImportCard(onClick: () -> Unit) {
-    Card(
-        Modifier.fillMaxWidth().clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    ) {
-        Row(
-            Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Icon(Icons.Filled.FileUpload, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            Column(Modifier.weight(1f)) {
-                Text("Import audio file", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                Text(
-                    "Transcribe a voice note or call recording from this phone.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Icon(
-                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+private fun EngineSummaryRow(settings: AppSettings, onClick: () -> Unit) {
+    val summary = buildString {
+        append(ProviderCatalog.label(settings.sttProvider))
+        append(" · ")
+        append(ProviderCatalog.shortModel(settings.sttModel))
+        if (settings.defaultMode.usesLlm) {
+            append(" → ")
+            append(ProviderCatalog.shortModel(settings.activeLlmModel))
         }
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = Sizes.touch)
+            .clickable(onClick = onClick)
+            .padding(horizontal = Space.sm),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.sm),
+    ) {
+        Icon(
+            Icons.Filled.Tune,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp),
+        )
+        Text(
+            summary,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp),
+        )
     }
 }
 
-/* ── Setup banner: appears only when something's missing ─────────────────── */
+/* ── Setup banner ────────────────────────────────────────────────────────── */
 
+/**
+ * The single merged banner. Names *what* is missing rather than counting it —
+ * "2 permissions still need to be granted" told the user nothing actionable.
+ */
 @Composable
-private fun SetupBanner(missingCount: Int, onClick: () -> Unit) {
+private fun SetupBanner(missing: List<String>, onClick: () -> Unit) {
+    val what = when (missing.size) {
+        1 -> missing.first()
+        2 -> "${missing[0]} and ${missing[1]}"
+        else -> missing.dropLast(1).joinToString(", ") + ", and " + missing.last()
+    }
     Card(
-        Modifier.fillMaxWidth().clickable(onClick = onClick),
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(Radius.lg),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
     ) {
         Row(
-            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            Modifier.padding(Space.card),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(Space.md),
         ) {
             Icon(Icons.Filled.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
-            Column(Modifier.weight(1f)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                 Text(
                     "Finish setup",
                     style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
                 Text(
-                    if (missingCount == 1) "One permission still needs to be granted."
-                    else "$missingCount permissions still need to be granted.",
+                    "Turn on $what so Foxy can float over your apps and drop text into them.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
@@ -393,56 +372,25 @@ private fun SetupBanner(missingCount: Int, onClick: () -> Unit) {
     }
 }
 
-/* ── Accessibility-off explainer ─────────────────────────────────────────── */
-
-@Composable
-private fun AccessibilityBanner(onEnable: () -> Unit) {
-    Card(
-        Modifier.fillMaxWidth().clickable(onClick = onEnable),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
-    ) {
-        Row(
-            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Icon(Icons.Filled.Mic, contentDescription = null, tint = MaterialTheme.colorScheme.onTertiaryContainer)
-            Column(Modifier.weight(1f)) {
-                Text(
-                    "Turn on accessibility",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer,
-                )
-                Text(
-                    "Until it's on, the floating fox stays hidden and your words " +
-                        "can't land in the box automatically — they're copied so you " +
-                        "can paste. Tap to enable.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer,
-                )
-            }
-            Icon(
-                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onTertiaryContainer,
-            )
-        }
-    }
-}
-
 /* ── Recents preview ─────────────────────────────────────────────────────── */
 
 @Composable
 private fun RecentsCard(recordings: List<Recording>, onOpenAll: () -> Unit) {
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-        Column(Modifier.padding(vertical = 6.dp)) {
+    Card(
+        Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(Radius.lg),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(Modifier.padding(vertical = Space.sm)) {
             Row(
-                Modifier.fillMaxWidth().clickable(onClick = onOpenAll).padding(horizontal = 14.dp, vertical = 10.dp),
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = Sizes.touch)
+                    .clickable(onClick = onOpenAll)
+                    .padding(horizontal = Space.card),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Recent", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.weight(1f))
+                Text("Recent", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                 Text("See all", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                 Icon(
                     Icons.AutoMirrored.Filled.KeyboardArrowRight,
@@ -452,15 +400,13 @@ private fun RecentsCard(recordings: List<Recording>, onOpenAll: () -> Unit) {
             }
             if (recordings.isEmpty()) {
                 Text(
-                    "Nothing yet — tap the fox to dictate something.",
+                    "Nothing yet — tap Foxy to dictate something.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    modifier = Modifier.padding(horizontal = Space.card, vertical = Space.sm),
                 )
             } else {
-                recordings.forEach { r ->
-                    RecentRow(r, onClick = onOpenAll)
-                }
+                recordings.forEach { RecentRow(it, onClick = onOpenAll) }
             }
         }
     }
@@ -468,97 +414,70 @@ private fun RecentsCard(recordings: List<Recording>, onOpenAll: () -> Unit) {
 
 @Composable
 private fun RecentRow(rec: Recording, onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = Sizes.touch)
+            .clickable(onClick = onClick)
+            .padding(horizontal = Space.card, vertical = Space.sm),
+        verticalArrangement = Arrangement.spacedBy(Space.xs),
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                rec.primaryText()?.takeIf { it.isNotBlank() }?.let { it.take(80) }
-                    ?: "(no transcript yet)",
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-            )
-            Text(
-                "${recentTimeFmt.format(Date(rec.createdAt))} · ${rec.mode.label} · ${rec.durationMs / 1000}s",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        Text(
+            rec.primaryText()?.takeIf { it.isNotBlank() }?.take(80) ?: "(no transcript yet)",
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            "${recentTimeFmt.format(Date(rec.createdAt))} · ${rec.mode.label} · ${rec.durationMs / 1000}s",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
 private val recentTimeFmt = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
 
-/* ── Reusables ───────────────────────────────────────────────────────────── */
+/* ── Import ──────────────────────────────────────────────────────────────── */
 
+/** Demoted from a card to a row — it's a rare action, not a headline. */
 @Composable
-private fun StatusPill(state: AppState.Snapshot, recording: Boolean) {
-    val color = if (recording || state.pipeline != PipelineState.IDLE) MaterialTheme.colorScheme.primary else GREEN
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Box(Modifier.size(8.dp).background(color, CircleShape))
-        Text(statusLine(state), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-@Composable
-private fun <T> ChipRow(options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        options.forEach { (value, label) ->
-            FilterChip(selected = selected == value, onClick = { onSelect(value) }, label = { Text(label) })
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun ModelFlow(options: List<Pair<String, String>>, selected: String, onSelect: (String) -> Unit) {
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+private fun ImportRow(onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = Sizes.touch)
+            .clickable(onClick = onClick)
+            .padding(horizontal = Space.sm),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.md),
     ) {
-        options.forEach { (value, label) ->
-            FilterChip(selected = selected == value, onClick = { onSelect(value) }, label = { Text(label) })
-        }
+        Icon(Icons.Filled.FileUpload, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Text(
+            "Import an audio file",
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
-}
-
-@Composable
-private fun SectionCard(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-            content()
-        }
-    }
-}
-
-@Composable
-private fun AvatarChip(
-    selected: Boolean,
-    enabled: Boolean = true,
-    onClick: () -> Unit,
-    content: @Composable () -> Unit,
-) {
-    val border = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
-    Box(
-        modifier = Modifier
-            .size(54.dp)
-            .border(2.dp, border, RoundedCornerShape(14.dp))
-            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp))
-            .clickable(enabled = enabled) { onClick() },
-        contentAlignment = Alignment.Center,
-    ) { content() }
 }
 
 /* ── Permission probe ────────────────────────────────────────────────────── */
 
-private fun missingPermissions(ctx: Context): List<String> {
+/**
+ * Human-readable names, because they're rendered into the banner's prose now.
+ * `a11yConnected` is passed in from the AppState flow rather than polled.
+ */
+private fun missingPermissions(ctx: Context, a11yConnected: Boolean): List<String> {
     val out = mutableListOf<String>()
-    if (!Settings.canDrawOverlays(ctx)) out += "overlay"
-    if (!WisprFoxAccessibilityService.isConnected()) out += "auto-paste"
+    if (!Settings.canDrawOverlays(ctx)) out += "the floating fox"
+    if (!a11yConnected) out += "auto-paste"
     val pm = ctx.getSystemService(Context.POWER_SERVICE) as? PowerManager
-    if (pm?.isIgnoringBatteryOptimizations(ctx.packageName) != true) out += "battery"
+    if (pm?.isIgnoringBatteryOptimizations(ctx.packageName) != true) out += "the battery exemption"
     return out
 }
 
@@ -573,17 +492,7 @@ private fun heroTitle(s: AppState.Snapshot): String = when (s.pipeline) {
 }
 
 private fun heroSubtitle(s: AppState.Snapshot): String = when (s.pipeline) {
-    PipelineState.IDLE -> "I'm here when you're ready."
+    PipelineState.IDLE -> s.message ?: "I'm here when you're ready."
     PipelineState.ERROR -> s.message ?: "Tap to try again."
     else -> s.message ?: "Hang tight…"
-}
-
-private fun statusLine(s: AppState.Snapshot): String = when (s.pipeline) {
-    PipelineState.IDLE -> "Ready"
-    PipelineState.RECORDING -> "Recording"
-    PipelineState.TRANSCRIBING -> "Transcribing"
-    PipelineState.CLEANING -> "Polishing"
-    PipelineState.INJECTING -> "Delivering"
-    PipelineState.DONE -> "Done"
-    PipelineState.ERROR -> "Error"
 }

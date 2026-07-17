@@ -4,7 +4,11 @@ kotlin = "2.0.21"
 ksp = "2.0.21-1.0.28"
 coreKtx = "1.15.0"
 activityCompose = "1.9.3"
-composeBom = "2024.11.00"
+# M3 Expressive (material3 1.4.0) lands here. Verified against compileSdk 35 /
+# AGP 8.7.3: every artifact in this BOM declares minCompileSdk=35 and
+# minAndroidGradlePluginVersion=8.6.0, so the redesign gets Expressive without
+# dragging targetSdk to 36 (which would remove the edge-to-edge opt-out).
+composeBom = "2026.06.01"
 lifecycle = "2.8.7"
 navigationCompose = "2.8.4"
 coroutines = "1.9.0"

@@ -10,6 +10,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.unit.dp
 
 /** Where the bottom bar currently is — keeps Home/History one tap apart. */
 enum class NavTab { HOME, HISTORY }
@@ -25,7 +26,7 @@ enum class NavTab { HOME, HISTORY }
 fun WisprBottomBar(current: NavTab, onSelect: (NavTab) -> Unit) {
     NavigationBar(
         containerColor = MaterialTheme.colorScheme.surface,
-        tonalElevation = 0.dp(),
+        tonalElevation = 0.dp,
     ) {
         NavigationBarItem(
             selected = current == NavTab.HOME,
@@ -51,5 +52,3 @@ fun WisprBottomBar(current: NavTab, onSelect: (NavTab) -> Unit) {
         )
     }
 }
-
-private fun Int.dp() = androidx.compose.ui.unit.Dp(this.toFloat())

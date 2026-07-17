@@ -19,6 +19,12 @@
         android:allowBackup="false"
         android:supportsRtl="true">
 
+        <!-- `uiMode` in configChanges says this activity handles day/night flips
+             itself rather than being recreated. It now genuinely does: the theme
+             is driven by isSystemInDarkTheme(), which reads LocalConfiguration
+             and recomposes when the system dispatches the change. Before the
+             theme work it "handled" them by ignoring them — the app was a single
+             hard-coded light scheme (audit P1-1). -->
         <activity
             android:name=".MainActivity"
             android:exported="true"

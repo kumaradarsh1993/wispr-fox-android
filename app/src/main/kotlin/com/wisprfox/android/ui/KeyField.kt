@@ -16,7 +16,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.unit.dp
 import com.wisprfox.android.settings.SecureKeyStore
 
 /**
@@ -35,7 +34,7 @@ fun KeyField(
     var saved by remember { mutableStateOf(secrets.has(key)) }
     var status by remember { mutableStateOf<String?>(null) }
 
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp())) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
         OutlinedTextField(
             value = value,
             onValueChange = { value = it },
@@ -44,7 +43,7 @@ fun KeyField(
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp())) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
             Button(
                 enabled = value.isNotBlank(),
                 onClick = {
@@ -64,5 +63,3 @@ fun KeyField(
         status?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
     }
 }
-
-private fun Int.dp() = androidx.compose.ui.unit.Dp(this.toFloat())

@@ -8,10 +8,21 @@ import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import com.wisprfox.android.ui.SettingsSpoke
 import com.wisprfox.android.ui.WisprFoxTheme
+import com.wisprfox.android.ui.rememberThemeChoice
+import com.wisprfox.android.ui.settings.AboutSpoke
+import com.wisprfox.android.ui.settings.AccountSpoke
+import com.wisprfox.android.ui.settings.CleanupSpoke
+import com.wisprfox.android.ui.settings.DeliverySpoke
+import com.wisprfox.android.ui.settings.FoxySpoke
+import com.wisprfox.android.ui.settings.StorageSpoke
+import com.wisprfox.android.ui.settings.TranscriptionSpoke
+import com.wisprfox.android.ui.settings.UsageSpoke
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -52,12 +63,18 @@ class MainActivity : ComponentActivity() {
     private var pendingDeepLink by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // targetSdk 35 on Android 15+ *enforces* edge-to-edge whether we opt in
+        // or not, and this call was simply never made (audit P1-2) — so the app
+        // has been drawing under the system bars and only surviving on the
+        // screens that happened to use Scaffold. Must precede setContent.
+        // WisprFoxTheme sets the bar icon polarity to match the painted surface.
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         requestRuntimePermissions()
         pendingDeepLink = intent?.getStringExtra(EXTRA_OPEN)
         handleAuthCallbackIfPresent(intent)
         setContent {
-            WisprFoxTheme {
+            WisprFoxTheme(choice = rememberThemeChoice()) {
                 Surface(modifier = Modifier.fillMaxSize(), color = androidx.compose.material3.MaterialTheme.colorScheme.background) {
                     val nav = rememberNavController()
                     val hasKey = hasAnySttKey()
@@ -123,10 +140,44 @@ class MainActivity : ComponentActivity() {
                                 },
                             )
                         }
+                        // Settings is hub-and-spoke (audit P0-3): the hub is a
+                        // list of rows with current-value summaries, each opening
+                        // a large-title sub-page. One route per spoke.
                         composable("settings") {
                             SettingsScreen(
                                 onBack = { nav.popBackStack() },
-                                onReplayOnboarding = { nav.navigate("onboarding") },
+                                onOpenSpoke = { nav.navigate(it.route) },
+                            )
+                        }
+                        composable(SettingsSpoke.TRANSCRIPTION.route) {
+                            TranscriptionSpoke(onBack = { nav.popBackStack() })
+                        }
+                        composable(SettingsSpoke.CLEANUP.route) {
+                            CleanupSpoke(onBack = { nav.popBackStack() })
+                        }
+                        composable(SettingsSpoke.FOXY.route) {
+                            FoxySpoke(onBack = { nav.popBackStack() })
+                        }
+                        composable(SettingsSpoke.DELIVERY.route) {
+                            DeliverySpoke(onBack = { nav.popBackStack() })
+                        }
+                        composable(SettingsSpoke.USAGE.route) {
+                            UsageSpoke(onBack = { nav.popBackStack() })
+                        }
+                        composable(SettingsSpoke.STORAGE.route) {
+                            StorageSpoke(onBack = { nav.popBackStack() })
+                        }
+                        composable(SettingsSpoke.ACCOUNT.route) {
+                            AccountSpoke(onBack = { nav.popBackStack() })
+                        }
+                        composable(SettingsSpoke.ABOUT.route) {
+                            AboutSpoke(
+                                onBack = { nav.popBackStack() },
+                                // Replaying setup from About shouldn't leave the
+                                // whole settings stack underneath it.
+                                onReplayOnboarding = {
+                                    nav.navigate("onboarding") { popUpTo("home") }
+                                },
                             )
                         }
                     }

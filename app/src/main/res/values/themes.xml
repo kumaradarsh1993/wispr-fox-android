@@ -2,10 +2,26 @@
 <resources>
     <!-- App theme + Android 12 splash. Cream background with the fox icon so the
          cold-start splash is intentional and on-brand (was the default jagged
-         icon-on-white). The Compose UI sets its own colors after launch. -->
-    <style name="Theme.WisprFox" parent="@android:style/Theme.Material.Light.NoActionBar">
-        <item name="android:windowSplashScreenBackground">@color/ic_launcher_background</item>
+         icon-on-white). The Compose UI sets its own colors after launch.
+
+         DayNight parent, not Material.Light: the old light-only parent meant the
+         window background and splash stayed hard-light on a phone in dark mode,
+         so launching the app in dark mode flashed a cream rectangle before
+         Compose painted (audit P1-1). values-night/ carries the dark values.
+
+         The system bars are left to the framework here on purpose —
+         MainActivity calls enableEdgeToEdge() (which makes them transparent) and
+         WisprFoxTheme drives icon polarity off the *painted* surface, since a
+         locked "Foxy" theme on a phone in dark mode still needs dark icons over
+         cream (audit P1-2). -->
+    <!-- The platform ships no `.DayNight.NoActionBar` variant, so the action bar
+         is switched off by hand rather than inherited away. -->
+    <style name="Theme.WisprFox" parent="@android:style/Theme.DeviceDefault.DayNight">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:windowSplashScreenBackground">@color/splash_background</item>
         <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
-        <item name="android:windowSplashScreenIconBackgroundColor">@color/ic_launcher_background</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/splash_background</item>
     </style>
 </resources>

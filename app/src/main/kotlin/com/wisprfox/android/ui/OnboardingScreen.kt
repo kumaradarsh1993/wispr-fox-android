@@ -25,7 +25,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -117,7 +119,14 @@ fun OnboardingScreen(onDone: () -> Unit) {
     Column(
         Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
+            .background(MaterialTheme.colorScheme.background)
+            // Audit P1-2: this screen had *zero* inset handling — no Scaffold, no
+            // WindowInsets — while targetSdk 35 on Android 15+ enforces
+            // edge-to-edge. The wordmark rendered under the status bar and "Get
+            // started" sat under the gesture bar, on the very first screen a new
+            // user sees. safeDrawingPadding covers status bar, gesture bar, and
+            // the IME (which step 2's key fields raise).
+            .safeDrawingPadding(),
     ) {
         OnboardingHeader(step, totalSteps)
 
@@ -168,11 +177,12 @@ private fun OnboardingHeader(step: Int, totalSteps: Int = 3) {
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 4.dp),
+            .padding(horizontal = Space.screen)
+            .padding(top = Space.lg, bottom = Space.xs),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
             Image(painterResource(R.drawable.fox_logo), contentDescription = null, modifier = Modifier.size(26.dp))
             Text(
                 buildAnnotatedString {
@@ -183,7 +193,7 @@ private fun OnboardingHeader(step: Int, totalSteps: Int = 3) {
                 fontWeight = FontWeight.Bold,
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.sm), verticalAlignment = Alignment.CenterVertically) {
             for (i in 0 until totalSteps) {
                 val color = when {
                     i == step -> MaterialTheme.colorScheme.primary
@@ -218,7 +228,10 @@ private fun WelcomeStep(canSkipSetup: Boolean, onNext: () -> Unit, onSkip: () ->
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        Spacer(Modifier.height(2.dp))
+        Spacer(Modifier.height(Space.xs))
+        // Three cards, not four: the "Draft is the hidden superpower" card was a
+        // fourth thing to read before the only button on the screen, and it was
+        // talking about the card directly above it. Folded into Draft's own note.
         ModeCard(
             tag = "Raw",
             said = "the meeting is at 4 pm tomorrow",
@@ -233,24 +246,11 @@ private fun WelcomeStep(canSkipSetup: Boolean, onNext: () -> Unit, onSkip: () ->
             tag = "Draft",
             said = "tell saurabh i'll be late tomorrow",
             got = "Hi Saurabh, just letting you know I'll be running late tomorrow…",
+            note = "The hidden superpower — say the gist and Foxy writes the whole thing.",
+            highlight = true,
         )
 
-        Card(
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(
-                buildAnnotatedString {
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("Draft is the hidden superpower — ") }
-                    append("say the gist of what you want and Foxy writes the whole thing. Message, email, note, anything.")
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.padding(14.dp),
-            )
-        }
-
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(Space.xs))
         Button(onClick = onNext, modifier = Modifier.fillMaxWidth()) { Text("Get started") }
         if (canSkipSetup) {
             TextButton(onClick = onSkip, modifier = Modifier.align(Alignment.CenterHorizontally)) {
@@ -261,41 +261,75 @@ private fun WelcomeStep(canSkipSetup: Boolean, onNext: () -> Unit, onSkip: () ->
 }
 
 @Composable
-private fun ModeCard(tag: String, said: String, got: String) {
+private fun ModeCard(
+    tag: String,
+    said: String,
+    got: String,
+    note: String? = null,
+    highlight: Boolean = false,
+) {
     Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        colors = CardDefaults.cardColors(
+            containerColor = if (highlight) MaterialTheme.colorScheme.primaryContainer
+            else MaterialTheme.colorScheme.surface,
+        ),
+        shape = RoundedCornerShape(Radius.lg),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(Modifier.padding(Space.card), verticalArrangement = Arrangement.spacedBy(Space.sm)) {
             Box(
                 Modifier
-                    .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(7.dp))
-                    .padding(horizontal = 10.dp, vertical = 3.dp),
+                    .background(
+                        if (highlight) MaterialTheme.colorScheme.surface
+                        else MaterialTheme.colorScheme.primaryContainer,
+                        RoundedCornerShape(Radius.sm),
+                    )
+                    .padding(horizontal = Space.sm, vertical = Space.xs),
             ) {
                 Text(
                     tag,
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    color = if (highlight) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onPrimaryContainer,
                 )
             }
-            ExampleLine("You say", said)
-            ExampleLine("You get", got)
+            ExampleLine("You say", said, highlight)
+            ExampleLine("You get", got, highlight)
+            if (note != null) {
+                Text(
+                    note,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (highlight) MaterialTheme.colorScheme.onPrimaryContainer
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun ExampleLine(label: String, text: String) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+private fun ExampleLine(label: String, text: String, highlight: Boolean = false) {
+    val onCard = if (highlight) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+    val muted = if (highlight) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
         Text(
             label.uppercase(),
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = muted,
             fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.size(width = 52.dp, height = 18.dp),
+            // widthIn, not a fixed size(): a hard-sized Text clips its own label
+            // once the user raises the font scale, and One UI's font-size slider
+            // is heavily used (audit P1-9).
+            modifier = Modifier.widthIn(min = 56.dp),
         )
-        Text("\"$text\"", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+        Text(
+            "\"$text\"",
+            style = MaterialTheme.typography.bodySmall,
+            color = onCard,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 
@@ -325,7 +359,7 @@ private fun SetupStep(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.padding(Space.card), verticalArrangement = Arrangement.spacedBy(Space.sm)) {
                     Text(
                         "Have a setup code?",
                         style = MaterialTheme.typography.titleMedium,
@@ -382,7 +416,7 @@ private fun SetupStep(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.padding(Space.card), verticalArrangement = Arrangement.spacedBy(Space.md)) {
                 Text("Add a speech-to-text key", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 var clicks by remember { mutableIntStateOf(0) }
                 Text(
@@ -403,22 +437,27 @@ private fun SetupStep(
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text(if (clicks == 0) "Get my Groq key" else "Take me to my keys page") }
 
+                // ONE field — Groq, the recommended path. The other three used to
+                // render unconditionally right here, on the step where a new user
+                // is most likely to bail, turning it into ~1,400dp of scroll
+                // (audit "Onboarding — fix insets, then cut").
                 KeyField("Paste your Groq key (gsk_…)", SecureKeyStore.Key.GroqStt, container.secrets) {
                     if (it) scope.launch { container.settingsStore.setSttProvider(ProviderCatalog.STT_GROQ) }
                     onGroqChange(hasAnySttKey(container.secrets))
                 }
-                KeyField("OpenAI key", SecureKeyStore.Key.OpenAiStt, container.secrets) {
-                    if (it) scope.launch { container.settingsStore.setSttProvider(ProviderCatalog.STT_OPENAI) }
-                    onGroqChange(hasAnySttKey(container.secrets))
+
+                var showOthers by rememberSaveable { mutableStateOf(false) }
+                TextButton(onClick = { showOthers = !showOthers }) {
+                    Text(if (showOthers) "Use Groq instead ▴" else "Use a different provider ▾")
                 }
-                KeyField("Deepgram key", SecureKeyStore.Key.DeepgramStt, container.secrets) {
-                    if (it) scope.launch { container.settingsStore.setSttProvider(ProviderCatalog.STT_DEEPGRAM) }
-                    onGroqChange(hasAnySttKey(container.secrets))
+                if (showOthers) {
+                    Column(verticalArrangement = Arrangement.spacedBy(Space.md)) {
+                        OtherSttKey("OpenAI key", SecureKeyStore.Key.OpenAiStt, ProviderCatalog.STT_OPENAI, container, onGroqChange)
+                        OtherSttKey("Deepgram key", SecureKeyStore.Key.DeepgramStt, ProviderCatalog.STT_DEEPGRAM, container, onGroqChange)
+                        OtherSttKey("ElevenLabs key", SecureKeyStore.Key.ElevenLabsStt, ProviderCatalog.STT_ELEVENLABS, container, onGroqChange)
+                    }
                 }
-                KeyField("ElevenLabs key", SecureKeyStore.Key.ElevenLabsStt, container.secrets) {
-                    if (it) scope.launch { container.settingsStore.setSttProvider(ProviderCatalog.STT_ELEVENLABS) }
-                    onGroqChange(hasAnySttKey(container.secrets))
-                }
+
                 Text(
                     "Keys stay encrypted on this phone. Audio is sent only to the provider you select.",
                     style = MaterialTheme.typography.labelSmall,
@@ -432,7 +471,7 @@ private fun SetupStep(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.padding(Space.card), verticalArrangement = Arrangement.spacedBy(Space.sm)) {
                 Text("Gemini key (optional)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 Text(
                     "Only needed if you switch the cleanup provider to Gemini in Settings.",
@@ -443,8 +482,8 @@ private fun SetupStep(
             }
         }
 
-        Spacer(Modifier.height(2.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Spacer(Modifier.height(Space.xs))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.md)) {
             OutlinedButton(onClick = onBack, modifier = Modifier.weight(1f)) { Text("Back") }
             Button(onClick = onNext, enabled = groqSaved, modifier = Modifier.weight(1f)) {
                 Text(if (groqSaved) "Next" else "Add a key")
@@ -453,15 +492,36 @@ private fun SetupStep(
     }
 }
 
+/**
+ * A non-Groq STT key. Saving one also makes it the active provider — same
+ * behaviour the four always-visible fields had, just not always visible.
+ */
+@Composable
+private fun OtherSttKey(
+    label: String,
+    key: SecureKeyStore.Key,
+    provider: String,
+    container: com.wisprfox.android.core.AppContainer,
+    onGroqChange: (Boolean) -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    KeyField(label, key, container.secrets) {
+        if (it) scope.launch { container.settingsStore.setSttProvider(provider) }
+        onGroqChange(hasAnySttKey(container.secrets))
+    }
+}
+
 @Composable
 private fun HowIsThisFree() {
-    var open by remember { mutableStateOf(true) }
+    // Collapsed by default: it answers a question the user hasn't asked yet, and
+    // expanded it pushed the actual key field further down the bail-out step.
+    var open by rememberSaveable { mutableStateOf(false) }
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.fillMaxWidth().clickable { open = !open }.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.fillMaxWidth().clickable { open = !open }.padding(Space.card), verticalArrangement = Arrangement.spacedBy(Space.sm)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
                 Text(if (open) "▾" else "▸", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("How is this free?", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             }
@@ -492,7 +552,7 @@ private fun GrantStep(ctx: Context, permTick: Int, onBack: () -> Unit, onFinish:
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        PermissionRow(
+        PermissionCard(
             title = "Show the floating fox",
             subtitle = "Lets Foxy hover over any app as your tap-to-talk button.",
             granted = canOverlay,
@@ -503,14 +563,14 @@ private fun GrantStep(ctx: Context, permTick: Int, onBack: () -> Unit, onFinish:
                 }
             },
         )
-        PermissionRow(
+        PermissionCard(
             title = "Auto-paste into the box",
             subtitle = "Drops your words straight into the focused field. Without it, text is copied to the clipboard to paste yourself.",
             granted = a11yOn,
             cta = "Enable auto-paste",
             onClick = { ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
         )
-        PermissionRow(
+        PermissionCard(
             title = "Keep Foxy alive",
             subtitle = "A battery exemption so Android doesn't kill the mic mid-sentence.",
             granted = battOk,
@@ -522,8 +582,8 @@ private fun GrantStep(ctx: Context, permTick: Int, onBack: () -> Unit, onFinish:
             },
         )
 
-        Spacer(Modifier.height(2.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Spacer(Modifier.height(Space.xs))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.md)) {
             OutlinedButton(onClick = onBack, modifier = Modifier.weight(1f)) { Text("Back") }
             Button(
                 onClick = onFinish,
@@ -542,35 +602,8 @@ private fun GrantStep(ctx: Context, permTick: Int, onBack: () -> Unit, onFinish:
     }
 }
 
-@Composable
-private fun PermissionRow(title: String, subtitle: String, granted: Boolean, cta: String, onClick: () -> Unit) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            val tickColor = if (granted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
-            Box(Modifier.size(26.dp).background(tickColor, CircleShape), contentAlignment = Alignment.Center) {
-                if (granted) Text("✓", color = Color.White, fontWeight = FontWeight.Bold)
-            }
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (!granted) {
-                    TextButton(
-                        onClick = onClick,
-                        contentPadding = ButtonDefaults.TextButtonContentPadding,
-                        modifier = Modifier.padding(top = 2.dp),
-                    ) { Text(cta) }
-                }
-            }
-        }
-    }
-}
+// PermissionCard lives in ui/Components.kt — Settings → Delivery shows the same
+// three permissions, and this screen's private copy was the original.
 
 /* ── Screen 4: Sync across devices (accounts, v2.0 — only when configured) ── */
 
@@ -590,13 +623,13 @@ private fun SyncStep(
         )
 
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp)) {
+            Column(Modifier.padding(Space.card)) {
                 AccountSection(container, showDeviceName = false)
             }
         }
 
-        Spacer(Modifier.height(2.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Spacer(Modifier.height(Space.xs))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.md)) {
             OutlinedButton(onClick = onBack, modifier = Modifier.weight(1f)) { Text("Back") }
             Button(onClick = onDone, modifier = Modifier.weight(1f)) {
                 Text(if (authState.signedIn) "Start dictating" else "Continue without an account")
@@ -613,8 +646,11 @@ private fun StepScaffold(content: @Composable androidx.compose.foundation.layout
         Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            // Same horizontal inset as every other screen (was 20dp here, 16 in
+            // Settings, 12 in History, 20 on Home — audit P0-1).
+            .padding(horizontal = Space.screen)
+            .padding(top = Space.md, bottom = Space.xl),
+        verticalArrangement = Arrangement.spacedBy(Space.md),
         content = content,
     )
 }

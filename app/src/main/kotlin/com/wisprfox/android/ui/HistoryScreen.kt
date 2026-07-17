@@ -7,10 +7,12 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -18,7 +20,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Close
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -41,6 +43,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -53,12 +56,12 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.wisprfox.android.WisprFoxApp
 import com.wisprfox.android.core.AltVersionGenerator
@@ -68,25 +71,30 @@ import com.wisprfox.android.history.Recording
 import com.wisprfox.android.history.RecordingStatus
 import com.wisprfox.android.provider.DictationMode
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.launch
 
 /**
- * History/Library, with the v1.1 additions:
+ * History/Library.
  *
- *  - **Retry chip is always visible**, matching the desktop sibling
- *    (`HistoryRow.svelte` retry comment): stranded rows can be stuck in
- *    transcribing/cleaning, and retry is the recovery path. Confirm
- *    dialog on non-error rows so a stray tap doesn't burn an STT call.
- *    Retry count appears next to the meta line (↻ N).
- *  - **Select mode** in the top bar — multi-select rows and bulk delete.
- *    Overflow menu → "Delete all". Every destructive path goes through
- *    a confirm dialog and removes the WAV from disk via the repository.
- *  - **Bottom NavigationBar** (Home/History) — replaces the buried
- *    history card on home.
+ * The audit's read was that this is the best screen in the app and needed
+ * density and grouping rather than rework — the select mode, the always-visible
+ * retry chip and the confirm dialogs are all well-judged and are untouched here.
+ *
+ * What changed:
+ *  - **Date group headers** ("Today" / "Yesterday" / …) as sticky headers. Every
+ *    row used to print an absolute timestamp, which is noisy and hard to scan.
+ *  - **Density**: rows were ~120dp (card + 14dp + timestamp line + badge row +
+ *    2-line preview), so ~6 fit a screen. The preview is now the headline and
+ *    the meta collapses to one line beneath it.
+ *  - **Status noise**: every row rendered "done" as a status label. Status now
+ *    only appears when it *isn't* done — i.e. when it means something.
+ *  - **Search**, filtering the transcript. There was no way to find anything in
+ *    a corpus that only grows.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun HistoryScreen(onBack: () -> Unit, onOpenHome: () -> Unit) {
     val ctx = LocalContext.current
@@ -98,7 +106,11 @@ fun HistoryScreen(onBack: () -> Unit, onOpenHome: () -> Unit) {
     val authState by container.authManager.state.collectAsState()
     val signedIn = authState.signedIn
 
-    var selectMode by remember { mutableStateOf(false) }
+    // rememberSaveable: select mode and the query survive process death, which
+    // `remember` did not.
+    var selectMode by rememberSaveable { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var searchOpen by rememberSaveable { mutableStateOf(false) }
     val selected = remember { mutableStateMapOf<String, Boolean>() }
     var menuOpen by remember { mutableStateOf(false) }
     var confirmDeleteAll by remember { mutableStateOf(false) }
@@ -112,6 +124,11 @@ fun HistoryScreen(onBack: () -> Unit, onOpenHome: () -> Unit) {
     // Shared delete applier for the bulk paths (delete-all + multi-select) —
     // routes the DeleteDialog's choices to the repository the same way the
     // per-row path does, so semantics never diverge between the three surfaces.
+    //
+    // The branch order looks like it drops `voiceFiles` when both are checked,
+    // but it doesn't: RecordingRepository.deleteTranscripts already unlinks each
+    // row's WAV before deleting the row, so "transcripts" is a strict superset of
+    // "voice files". Verified against the repository, not assumed.
     fun applyDelete(ids: List<String>, voiceFiles: Boolean, transcripts: Boolean, scope2: DeleteScope) {
         scope.launch {
             when {
@@ -121,15 +138,22 @@ fun HistoryScreen(onBack: () -> Unit, onOpenHome: () -> Unit) {
         }
     }
 
+    val visible = remember(recordings, query) {
+        if (query.isBlank()) recordings
+        else recordings.filter { rec ->
+            rec.primaryText()?.contains(query, ignoreCase = true) == true ||
+                rec.transcript?.contains(query, ignoreCase = true) == true
+        }
+    }
+    val grouped = remember(visible) { visible.groupBy { dayBucket(it.createdAt) } }
+    val anyChecked = selected.any { it.value }
+
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
-                title = {
-                    Text(
-                        if (selectMode) "${selected.count { it.value }} selected" else "History",
-                    )
-                },
+                title = { Text(if (selectMode) "${selected.count { it.value }} selected" else "History") },
                 navigationIcon = {
                     IconButton(onClick = { if (selectMode) exitSelectMode() else onBack() }) {
                         Icon(
@@ -140,15 +164,23 @@ fun HistoryScreen(onBack: () -> Unit, onOpenHome: () -> Unit) {
                 },
                 actions = {
                     if (selectMode) {
-                        val anyChecked = selected.any { it.value }
-                        IconButton(onClick = { confirmDeleteSelected = anyChecked }) {
-                            Icon(Icons.Filled.Delete, contentDescription = "Delete selected", tint = if (anyChecked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                        // Was `onClick = { confirmDeleteSelected = anyChecked }`,
+                        // which set the flag to *false* with nothing selected —
+                        // so the button silently did nothing. Disable it instead.
+                        IconButton(onClick = { confirmDeleteSelected = true }, enabled = anyChecked) {
+                            Icon(
+                                Icons.Filled.Delete,
+                                contentDescription = "Delete selected",
+                                tint = if (anyChecked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     } else {
-                        IconButton(
-                            onClick = { selectMode = true },
-                            enabled = recordings.isNotEmpty(),
-                        ) { Icon(Icons.Filled.CheckBoxOutlineBlank, contentDescription = "Select") }
+                        IconButton(onClick = { searchOpen = !searchOpen; if (!searchOpen) query = "" }) {
+                            Icon(Icons.Filled.Search, contentDescription = if (searchOpen) "Close search" else "Search")
+                        }
+                        IconButton(onClick = { selectMode = true }, enabled = recordings.isNotEmpty()) {
+                            Icon(Icons.Filled.CheckBoxOutlineBlank, contentDescription = "Select")
+                        }
                         Box {
                             IconButton(onClick = { menuOpen = true }) {
                                 Icon(Icons.Filled.MoreVert, contentDescription = "More")
@@ -168,33 +200,55 @@ fun HistoryScreen(onBack: () -> Unit, onOpenHome: () -> Unit) {
         },
         bottomBar = { WisprBottomBar(NavTab.HISTORY, onSelect = { if (it == NavTab.HOME) onOpenHome() }) },
     ) { inner ->
-        if (recordings.isEmpty()) {
-            Column(
-                Modifier.fillMaxSize().padding(inner).padding(24.dp),
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Text("Nothing yet", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text(
-                    "Recordings you make will appear here — replay the audio, retry, and view Raw / Clean / Draft versions.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+        Column(Modifier.fillMaxSize().padding(inner)) {
+            if (searchOpen && !selectMode) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    placeholder = { Text("Search transcripts") },
+                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(Radius.lg),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Space.screen, vertical = Space.sm),
                 )
             }
-        } else {
-            LazyColumn(
-                Modifier.fillMaxSize().padding(inner),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                items(recordings, key = { it.id }) { rec ->
-                    HistoryRow(
-                        rec = rec,
-                        player = player,
-                        selectMode = selectMode,
-                        signedIn = signedIn,
-                        checked = selected[rec.id] == true,
-                        onToggleSelect = { selected[rec.id] = !(selected[rec.id] ?: false) },
-                    )
+
+            if (recordings.isEmpty()) {
+                EmptyState(
+                    title = "Nothing yet",
+                    body = "Recordings you make will appear here — replay the audio, retry, and view Raw / Clean / Draft versions.",
+                )
+            } else if (visible.isEmpty()) {
+                EmptyState(
+                    title = "No matches",
+                    body = "Nothing in your history matches \"$query\".",
+                )
+            } else {
+                LazyColumn(
+                    Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(
+                        start = Space.screen,
+                        end = Space.screen,
+                        top = Space.sm,
+                        bottom = Space.xxl,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(Space.listGap),
+                ) {
+                    grouped.forEach { (bucket, rows) ->
+                        stickyHeader(key = "h-$bucket") { DayHeader(bucket) }
+                        items(rows, key = { it.id }) { rec ->
+                            HistoryRow(
+                                rec = rec,
+                                player = player,
+                                selectMode = selectMode,
+                                signedIn = signedIn,
+                                checked = selected[rec.id] == true,
+                                onToggleSelect = { selected[rec.id] = !(selected[rec.id] ?: false) },
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -229,6 +283,38 @@ fun HistoryScreen(onBack: () -> Unit, onOpenHome: () -> Unit) {
     }
 }
 
+@Composable
+private fun EmptyState(title: String, body: String) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(horizontal = Space.screen),
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(title, style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.size(Space.sm))
+        Text(
+            body,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** "Today" / "Yesterday" / "Mon, Jul 14". Replaces per-row absolute timestamps. */
+@Composable
+private fun DayHeader(label: String) {
+    Text(
+        label,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(top = Space.sm, bottom = Space.xs),
+    )
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun HistoryRow(
@@ -250,21 +336,28 @@ private fun HistoryRow(
     var confirmDelete by remember(rec.id) { mutableStateOf(false) }
 
     val isError = rec.status == RecordingStatus.ERROR
-    val rowBg = if (isError) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.18f)
-        else MaterialTheme.colorScheme.surface
+    val rowBg = if (isError) MaterialTheme.colorScheme.errorContainer
+    else MaterialTheme.colorScheme.surface
 
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = rowBg)) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Card(
+        Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(Radius.lg),
+        colors = CardDefaults.cardColors(containerColor = rowBg),
+    ) {
+        Column(Modifier.padding(Space.card), verticalArrangement = Arrangement.spacedBy(Space.sm)) {
             Row(
-                Modifier.fillMaxWidth().combinedClickable(
-                    onClick = { if (selectMode) onToggleSelect() else expanded = !expanded },
-                    // Long-press opens the delete dialog straight for this row
-                    // (SYNC_DESIGN.md press-and-hold delete), unless we're in
-                    // multi-select where a long-press has no separate meaning.
-                    onLongClick = { if (!selectMode) confirmDelete = true },
-                ),
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = if (selectMode) Sizes.touch else 0.dp)
+                    .combinedClickable(
+                        onClick = { if (selectMode) onToggleSelect() else expanded = !expanded },
+                        // Long-press opens the delete dialog straight for this row
+                        // (SYNC_DESIGN.md press-and-hold delete), unless we're in
+                        // multi-select where a long-press has no separate meaning.
+                        onLongClick = { if (!selectMode) confirmDelete = true },
+                    ),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(Space.md),
             ) {
                 if (selectMode) {
                     Icon(
@@ -273,31 +366,18 @@ private fun HistoryRow(
                         tint = if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(22.dp),
                     )
-                    Spacer(Modifier.size(10.dp))
                 }
-                Column(Modifier.weight(1f)) {
-                    Text(timeFmt.format(Date(rec.createdAt)), fontWeight = FontWeight.SemiBold)
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        PlatformBadge(rec.platformLabel())
-                        Text(
-                            "${rec.mode.label} · ${rec.durationMs / 1000}s · ${statusLabel(rec.status)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        if (rec.retryCount > 0) {
-                            Box(
-                                Modifier
-                                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(6.dp))
-                                    .padding(horizontal = 6.dp, vertical = 1.dp),
-                            ) {
-                                Text(
-                                    "↻ ${rec.retryCount}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                    }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                    // The transcript is the headline now — it's what the user is
+                    // scanning for. The timestamp used to occupy this line while
+                    // the text they came for sat two rows below.
+                    Text(
+                        rec.primaryText()?.takeIf { it.isNotBlank() }?.take(140) ?: "(no transcript yet)",
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = if (expanded && !selectMode) 1 else 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    MetaLine(rec, isError)
                 }
                 // Rows synced from another device have no local audio — hide play.
                 if (!selectMode && !rec.remote) {
@@ -311,16 +391,12 @@ private fun HistoryRow(
                 }
             }
 
-            // Collapsed preview text.
             if (!expanded && !selectMode) {
-                rec.primaryText()?.takeIf { it.isNotBlank() }?.let {
-                    Text(it.take(140), style = MaterialTheme.typography.bodyMedium, maxLines = 2)
-                }
                 rec.error?.takeIf { isError }?.let {
                     Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, maxLines = 2)
                 }
             } else if (!selectMode) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
                     TabChip("Raw", tab == Tab.RAW) { tab = Tab.RAW }
                     TabChip("Clean", tab == Tab.CLEANED) { tab = Tab.CLEANED }
                     TabChip("Draft", tab == Tab.REFORMATTED) { tab = Tab.REFORMATTED }
@@ -334,14 +410,17 @@ private fun HistoryRow(
 
                 if (text != null && text.isNotBlank()) {
                     Text(text, style = MaterialTheme.typography.bodyMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = { container.delivery.copyToClipboard(text) }) {
-                            Icon(Icons.Filled.ContentCopy, contentDescription = null)
-                            Text(" Copy")
-                        }
+                    TextButton(onClick = { container.delivery.copyToClipboard(text) }) {
+                        Icon(Icons.Filled.ContentCopy, contentDescription = null)
+                        Spacer(Modifier.size(Space.xs))
+                        Text("Copy")
                     }
                 } else if (tab == Tab.RAW) {
-                    Text("No transcript yet — tap Retry to run it.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        "No transcript yet — tap Retry to run it.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 } else if (rec.transcript.isNullOrBlank()) {
                     Text("Transcribe first, then a version can be generated.", style = MaterialTheme.typography.bodySmall)
                 } else {
@@ -362,7 +441,7 @@ private fun HistoryRow(
                     ) { Text(if (generating) "Generating…" else "Generate ${tab.label}") }
                 }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
                     // Retry/Re-run re-transcribes from the local WAV — a remote
                     // row (synced from another device) has no local audio, so
                     // it's hidden there; only Delete remains.
@@ -420,6 +499,7 @@ private fun HistoryRow(
                 confirmDelete = false
                 val ids = listOf(rec.id)
                 scope.launch {
+                    // Same superset relationship as applyDelete above.
                     when {
                         transcripts -> container.recordings.deleteTranscripts(ids, delScope)
                         voiceFiles -> container.recordings.deleteAudioOnly(ids)
@@ -430,20 +510,28 @@ private fun HistoryRow(
     }
 }
 
-/** Small chip showing where a recording came from (Desktop / Web / Mobile). */
+/**
+ * One meta line: time · platform · mode · duration, plus status only when it's
+ * worth saying. "done" on every completed row is noise, and completed is the
+ * overwhelmingly common case.
+ */
 @Composable
-private fun PlatformBadge(label: String) {
-    Box(
-        Modifier
-            .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(6.dp))
-            .padding(horizontal = 6.dp, vertical = 1.dp),
-    ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSecondaryContainer,
-        )
+private fun MetaLine(rec: Recording, isError: Boolean) {
+    val parts = buildList {
+        add(clockFmt.format(Date(rec.createdAt)))
+        add(rec.platformLabel())
+        add(rec.mode.label)
+        add("${rec.durationMs / 1000}s")
+        if (rec.status != RecordingStatus.DONE) add(statusLabel(rec.status))
+        if (rec.retryCount > 0) add("↻ ${rec.retryCount}")
     }
+    Text(
+        parts.joinToString(" · "),
+        style = MaterialTheme.typography.labelSmall,
+        color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 @Composable
@@ -458,9 +546,7 @@ private fun ConfirmDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = { Text(body) },
-        confirmButton = {
-            Button(onClick = onConfirm) { Text(confirm) }
-        },
+        confirmButton = { Button(onClick = onConfirm) { Text(confirm) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
@@ -488,4 +574,25 @@ private fun statusLabel(s: RecordingStatus): String = when (s) {
     RecordingStatus.ERROR -> "error"
 }
 
-private val timeFmt = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
+/**
+ * Groups a row under Today / Yesterday / an absolute date.
+ *
+ * Deliberately calendar-day based, not "hours ago": two recordings either side
+ * of midnight belong under different headers even if they're minutes apart,
+ * which is how people actually remember when they said something.
+ */
+private fun dayBucket(millis: Long): String {
+    val now = Calendar.getInstance()
+    val then = Calendar.getInstance().apply { timeInMillis = millis }
+    val sameYear = now.get(Calendar.YEAR) == then.get(Calendar.YEAR)
+    if (sameYear && now.get(Calendar.DAY_OF_YEAR) == then.get(Calendar.DAY_OF_YEAR)) return "Today"
+    now.add(Calendar.DAY_OF_YEAR, -1)
+    if (now.get(Calendar.YEAR) == then.get(Calendar.YEAR) &&
+        now.get(Calendar.DAY_OF_YEAR) == then.get(Calendar.DAY_OF_YEAR)
+    ) return "Yesterday"
+    return (if (sameYear) dayFmt else dayYearFmt).format(Date(millis))
+}
+
+private val clockFmt = SimpleDateFormat("h:mm a", Locale.getDefault())
+private val dayFmt = SimpleDateFormat("EEE, MMM d", Locale.getDefault())
+private val dayYearFmt = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())

@@ -1,4 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Adaptive launcher icon background. Stays cream in both modes — the icon
+         is a fixed asset whose foreground is drawn for a light backdrop. -->
     <color name="ic_launcher_background">#FAF6EC</color>
+
+    <!-- Pre-Compose window + splash colours. These have night variants
+         (values-night/colors.xml) so a cold start in dark mode doesn't flash
+         cream before the first Compose frame. Track Theme.kt's
+         FoxyLightPalette.surface / FoxyDarkPalette.surface. -->
+    <color name="window_background">#FAF6EC</color>
+    <color name="splash_background">#FAF6EC</color>
 </resources>

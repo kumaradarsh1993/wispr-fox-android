@@ -69,7 +69,7 @@ private fun SignedOutAccountCard(container: AppContainer) {
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
 
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.md)) {
         Text(
             "Sign in to sync transcripts, API keys, and settings across your phone, desktop, and browser. Audio never leaves this phone either way.",
             style = MaterialTheme.typography.bodySmall,
@@ -105,7 +105,7 @@ private fun SignedOutAccountCard(container: AppContainer) {
             visualTransformation = PasswordVisualTransformation(),
             modifier = Modifier.fillMaxWidth(),
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
             FilterToggle("Sign in", !creatingAccount) { creatingAccount = false }
             FilterToggle("Create account", creatingAccount) { creatingAccount = true }
         }
@@ -148,7 +148,7 @@ private fun SignedInAccountCard(container: AppContainer, email: String?, showDev
 
     LaunchedEffect(settings.lastSyncedAt) { lastSyncedLabel = relativeTime(settings.lastSyncedAt) }
 
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.md)) {
         Text("Signed in as", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(email ?: "unknown", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
 
@@ -160,14 +160,14 @@ private fun SignedInAccountCard(container: AppContainer, email: String?, showDev
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
                 Button(onClick = { scope.launch { container.settingsStore.setDeviceName(deviceName.trim().ifBlank { settings.deviceName }) } }) {
                     Text("Save name")
                 }
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
             Button(
                 enabled = !syncing,
                 onClick = {

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark-mode window + splash. The fireside browns from Theme.kt's
+         FoxyDarkPalette.surface, so the launch flash matches the first Compose
+         frame instead of contradicting it.
+
+         Note this follows the *system* setting, which is the best a resource
+         qualifier can do: a user who has locked the in-app theme to "Foxy" while
+         their phone is in dark mode will still get a dark splash before the
+         cream UI paints. Fixing that properly needs the splash colour set from
+         code at startup — not attempted here. -->
+    <color name="window_background">#1F1812</color>
+    <color name="splash_background">#1F1812</color>
+</resources>

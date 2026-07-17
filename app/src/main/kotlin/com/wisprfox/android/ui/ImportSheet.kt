@@ -51,9 +51,9 @@ fun ImportSheet(
             Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+                .padding(horizontal = Space.screen)
+                .padding(bottom = Space.xl),
+            verticalArrangement = Arrangement.spacedBy(Space.lg),
         ) {
             Text("Import audio", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Text(
@@ -148,7 +148,7 @@ fun ImportSheet(
 
 @Composable
 private fun Section(title: String, content: @Composable () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.sm)) {
         Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
         content()
     }
@@ -158,8 +158,8 @@ private fun Section(title: String, content: @Composable () -> Unit) {
 @Composable
 private fun <T> ChipFlow(options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit) {
     FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(Space.sm),
+        verticalArrangement = Arrangement.spacedBy(Space.sm),
     ) {
         options.forEach { (value, label) ->
             FilterChip(selected = selected == value, onClick = { onSelect(value) }, label = { Text(label) })

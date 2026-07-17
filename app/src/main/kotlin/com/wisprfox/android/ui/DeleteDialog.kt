@@ -47,12 +47,12 @@ fun DeleteDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (itemCount == 1) "Delete this recording?" else "Delete $itemCount recordings?") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.sm)) {
                 Text("What", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
                 CheckRow("Voice files (audio)", voiceFiles) { voiceFiles = it }
                 CheckRow("Transcripts", transcripts) { transcripts = it }
 
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(Space.xs))
                 Text("Where", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
                 RadioRow(
                     label = "This device only",
@@ -67,7 +67,7 @@ fun DeleteDialog(
                     onClick = { scope = DeleteScope.EVERYWHERE },
                 )
 
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(Space.xs))
                 Text(
                     consequence(voiceFiles, transcripts, scope, itemCount),
                     style = MaterialTheme.typography.bodySmall,
