@@ -1,12 +1,14 @@
 # Base prompt — read this FIRST
 
-> ## 🟢 CURRENT STATE — 2026-07-07
+> ## 🟢 CURRENT STATE — see HANDOVER (this block last touched 2026-07-17)
 >
-> **Fable nightly `v1.3.0-nightly.1` is the active working checkpoint** (core-reliability fixes + desktop parity ports; audit in `docs/AUDIT_2026-07-06_FABLE.md`). Last stable remains `v1.1.0` (commit `4cf396b`).
+> Active nightly is **v2.1.0-nightly.1** (UI redesign on a real design system + three bug fixes, shipped 2026-07-17); the accounts/cross-device-sync line landed at **v2.0.0-nightly.1**. Current stable remains **v1.4.0** (audio-file import); last stable before that was `v1.1.0` (commit `4cf396b`). **[HANDOVER.md](./HANDOVER.md) is the single source of truth** for what ships today, what's queued, and how to resume — read it first; it wins over this file wherever they disagree.
 >
-> Also read [CODEX_HANDOVER_2026-06-29.md](./CODEX_HANDOVER_2026-06-29.md) after [HANDOVER.md](./HANDOVER.md).
+> [CODEX_HANDOVER_2026-06-29.md](./CODEX_HANDOVER_2026-06-29.md) is **archived/historical** (the Codex agent is retired; its `v1.2.0-codex.2` preview was superseded by v1.4.0 and the v2.x line). Not required reading.
 >
-> Before reading anything else in this file, **read [HANDOVER.md](./HANDOVER.md)** — it's the single source of truth for what ships today, what's queued, and how to resume work. The sections below are kept for historical context (scope evolution, original design rationale) but the "pre-implementation" framing is no longer accurate.
+> **Delete policy migrated (2026-07-17):** Android dropped the old this-device/everywhere × voice-files/transcripts matrix for the shared **ownership-scoped** rule — a client deletes only rows it originated (`remote == false`), and a new **Purge** resets the whole account across all devices (clearing orphans). All three clients now share this. Canonical spec + protocol: `../wispr-fox-web/docs/SYNC_DESIGN.md`. See HANDOVER "Delete policy" for the Android specifics and the one runtime-unverified edge.
+>
+> The sections below are kept for historical context (scope evolution, original design rationale) but the "pre-implementation" framing is no longer accurate.
 
 > ## ⚠ SCOPE UPDATE — 2026-05-24 (overrides parts of this file below)
 >

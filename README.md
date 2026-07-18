@@ -6,9 +6,7 @@ Built for **Indian English + Hindi code-switching**, long ramble-y recordings, a
 
 Website: https://kumaradarsh1993.github.io/wispr-fox-android/
 
-Codex preview download: [wispr-fox-android-v1.2.0-codex.2.apk](https://github.com/kumaradarsh1993/wispr-fox-android/releases/download/v1.2.0-codex.2/wispr-fox-android-v1.2.0-codex.2.apk)
-
-Last Claude stable: [v1.1.0 app-debug.apk](https://github.com/kumaradarsh1993/wispr-fox-android/releases/download/v1.1.0/app-debug.apk)
+**Download:** the **[Releases page](https://github.com/kumaradarsh1993/wispr-fox-android/releases)** always has the latest APK + notes. Current stable: **v1.4.0** (audio-file import). Latest nightly: **v2.1.0-nightly.1** (UI redesign + bug fixes, on top of the v2.0.0 accounts/sync line).
 
 ---
 
@@ -38,17 +36,18 @@ Grab the APK above, or open the **[Releases page](https://github.com/kumaradarsh
 ## Privacy
 
 - API keys live in Android Keystore and never leave the device except as part of a request you triggered.
-- Audio is sent only to the speech-to-text provider you choose.
+- Audio is sent only to the speech-to-text provider you choose. **Voice files never leave your phone** — audio is never synced.
 - Transcripts and saved recordings stay on your phone by default (7 days / 500MB rolling cap, configurable).
-- No accounts. No analytics. No telemetry. No cloud sync.
+- No analytics. No telemetry.
+- **Accounts + sync are optional.** Signed out, the app is fully local — no account needed (bring-your-own-key only). Sign in (Google or email/password) and your *transcripts* and API keys sync across your desktop / web / phone via Supabase; sign out and it goes back to local-only.
 
 ---
 
 ## For developers
 
 - **HANDOVER.md** - current state, release notes, and next work.
-- **CODEX_HANDOVER_2026-06-29.md** - Codex checkpoint for Claude/Codex handoff.
 - **CLAUDE.md** - older session framing and architecture notes.
+- **CODEX_HANDOVER_2026-06-29.md** - *archived/historical* Codex checkpoint (superseded; kept for the audit trail).
 - **PRD.md** - original product spec, locked decisions, open questions.
 - **DESKTOP_LINKAGE.md** - relationship to the [desktop sibling](https://github.com/kumaradarsh1993/wispr-fox).
 
@@ -65,6 +64,6 @@ CI builds on every tag push (`v*`) and attaches an installable APK to the GitHub
 
 ## Current version
 
-**v1.2.0-codex.2** - Codex preview. Adds multi-provider STT, OpenAI cleanup, safer Android recording/paste handling, and GitHub APK automation.
+**Stable: v1.4.0** — import existing audio files through the transcribe → clean/draft pipeline (on top of multi-provider STT, OpenAI cleanup, safer recording/paste, and the Fable reliability batch).
 
-**v1.1.0** remains the last Claude stable checkpoint.
+**Latest nightly: v2.1.0-nightly.1** — optional accounts + cross-device transcript sync (v2.0.0 line), then a full UI redesign on a real design system with dark theme, plus fixes for avatar drift, a wedging pipeline, and auto-paste falsely reporting success. See the Releases page for notes.

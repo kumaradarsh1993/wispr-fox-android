@@ -1,14 +1,19 @@
 package com.wisprfox.android.ui
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -38,10 +43,17 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -307,6 +319,76 @@ fun PermissionCard(
                 }
             }
         }
+    }
+}
+
+/* ── Press-and-hold destructive action ───────────────────────────────────── */
+
+/**
+ * A deliberately-slow destructive control: the user must press and *hold* until
+ * the fill completes before [onHoldComplete] fires. Used to arm irreversible,
+ * cross-device actions (Purge) where a stray tap must never be enough — the hold
+ * is the first gate, a confirm dialog the second.
+ *
+ * The hold is genuinely cancellable: lifting the finger early cancels the
+ * progress animation and nothing fires. Completion only happens if the finger
+ * stays down for the full [holdMillis].
+ */
+@Composable
+fun HoldToConfirmButton(
+    text: String,
+    onHoldComplete: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    holdMillis: Int = 1500,
+) {
+    val progress = remember { Animatable(0f) }
+    var pressed by remember { mutableStateOf(false) }
+
+    LaunchedEffect(pressed) {
+        if (pressed) {
+            progress.snapTo(0f)
+            // animateTo suspends for the full duration; an early release flips
+            // `pressed` false, which restarts this effect and cancels the
+            // animation — so the line below is reached ONLY on a completed hold.
+            progress.animateTo(1f, animationSpec = tween(holdMillis, easing = LinearEasing))
+            onHoldComplete()
+            pressed = false
+        } else {
+            progress.snapTo(0f)
+        }
+    }
+
+    val bg = if (enabled) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant
+    val fg = if (enabled) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant
+
+    Box(
+        modifier
+            .fillMaxWidth()
+            .height(Sizes.touch)
+            .clip(RoundedCornerShape(Radius.lg))
+            .background(bg)
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
+                detectTapGestures(
+                    onPress = {
+                        pressed = true
+                        tryAwaitRelease()
+                        pressed = false
+                    },
+                )
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        // The fill grows left→right as the hold progresses.
+        Box(
+            Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(progress.value)
+                .align(Alignment.CenterStart)
+                .background(MaterialTheme.colorScheme.error.copy(alpha = 0.35f)),
+        )
+        Text(text, style = MaterialTheme.typography.labelLarge, color = fg)
     }
 }
 

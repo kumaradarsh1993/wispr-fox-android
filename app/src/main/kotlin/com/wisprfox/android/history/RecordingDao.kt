@@ -110,6 +110,21 @@ interface RecordingDao {
 
     @Query("UPDATE recordings SET platform = :platform, device_name = :deviceName WHERE id = :id")
     suspend fun setDeviceLabel(id: String, platform: String, deviceName: String?)
+
+    // ─── Ownership-scoped delete (SYNC_DESIGN.md "Delete — ownership-scoped") ──
+    // A client may only delete rows it originated. On Android "originated here"
+    // is exactly `remote = 0`: a pulled row is stamped remote=1 by
+    // RecordingRepository.applyRemoteNote and never flips back, while every
+    // locally-recorded/imported row stays remote=0. These filter to that set so
+    // the policy is enforced at the DB, not just hidden in the UI.
+
+    /** Ids of rows THIS device originated — the only ones it may delete. */
+    @Query("SELECT id FROM recordings WHERE remote = 0")
+    suspend fun listOwnedIds(): List<String>
+
+    /** Of [ids], just the ones THIS device originated (drops others' rows). */
+    @Query("SELECT id FROM recordings WHERE id IN (:ids) AND remote = 0")
+    suspend fun ownedAmong(ids: List<String>): List<String>
 }
 
 data class PurgeRow(

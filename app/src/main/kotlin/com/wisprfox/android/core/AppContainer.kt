@@ -83,7 +83,6 @@ class AppContainer(context: Context) {
                     llmModel = s.activeLlmModel,
                 )
             },
-            exclusionDao = database.syncExclusionDao(),
             // `syncEngine` is a `by lazy` property below referencing `recordings`
             // right back — safe because neither is evaluated until first
             // accessed, and nothing here touches `syncEngine` until a delete

@@ -76,8 +76,6 @@ data class RemotePulledNote(
     val deletedAtMillis: Long?,
 )
 
-enum class DeleteScope { THIS_DEVICE, EVERYWHERE }
-
 private fun RecordingEntity.toDomain() = Recording(
     id = id,
     createdAt = createdAt,
@@ -125,15 +123,16 @@ class RecordingRepository(
      * Returns null when settings aren't available (usage tally is skipped).
      */
     private val activeModels: (suspend () -> ActiveModels?)? = null,
-    /** Sync/accounts (schema v5). Null in any context that doesn't wire sync
-     *  (e.g. tests) — every use below is guarded so the repository still works
-     *  as pure local storage without it. */
-    private val exclusionDao: SyncExclusionDao? = null,
     /** Best-effort cloud tombstone (set `deleted_at` + null out the text
-     *  columns) for an "delete everywhere" request, invoked BEFORE the local
-     *  rows are removed. Supplied by [com.wisprfox.android.core.AppContainer]
-     *  as a lambda into [com.wisprfox.android.sync.SyncEngine] so this package
-     *  doesn't need a compile-time dependency on `sync`. */
+     *  columns), invoked BEFORE the local rows are removed. Deleting an
+     *  owned row is always "delete everywhere" now (SYNC_DESIGN.md
+     *  ownership-scoped delete): the tombstone propagates the deletion to every
+     *  other signed-in device on their next pull. Supplied by
+     *  [com.wisprfox.android.core.AppContainer] as a lambda into
+     *  [com.wisprfox.android.sync.SyncEngine] so this package doesn't need a
+     *  compile-time dependency on `sync`. Null in contexts that don't wire sync
+     *  (e.g. tests) — every use is guarded so the repository still works as pure
+     *  local storage without it. */
     private val tombstoneRemote: (suspend (List<String>) -> Unit)? = null,
 ) {
 
@@ -357,10 +356,7 @@ class RecordingRepository(
      * tombstone always wins (deletes the local row + its WAV, same as a local
      * delete); otherwise the pulled row only overwrites local state if it's
      * strictly newer, so a local edit racing a pull never gets clobbered by a
-     * stale remote copy. An id in [sync_exclusions] means the user explicitly
-     * removed it "this device only" — skip re-inserting it (tombstones still
-     * apply; they mean the row is gone everywhere, which is what the
-     * exclusion wanted for THIS device anyway).
+     * stale remote copy.
      *
      * Cloud rows have no local WAV (audio never syncs), so [audioPath] is left
      * empty — HistoryScreen checks [Recording.remote] to hide play/retry.
@@ -372,7 +368,6 @@ class RecordingRepository(
             applyTombstone(note.id)
             return
         }
-        if (exclusionDao?.exists(note.id) == true) return
         val localUpdatedAt = dao.getUpdatedAt(note.id)
         if (localUpdatedAt != null && localUpdatedAt >= note.updatedAtMillis) return
 
@@ -408,38 +403,35 @@ class RecordingRepository(
      *  a local delete) so this client converges with the tombstone. */
     suspend fun applyTombstone(id: String) = delete(id)
 
-    /** "Voice files" delete: drop the local WAV, keep the row (it reads as
-     *  "audio removed" once the file is gone — no separate flag needed, the
-     *  UI can check file existence). Never touches sync state; audio never
-     *  leaves the device in the first place. */
-    suspend fun deleteAudioOnly(ids: List<String>) {
+    /**
+     * Ownership-scoped delete (SYNC_DESIGN.md "Delete — ownership-scoped").
+     * A client may delete only the rows it originated, and doing so always
+     * means "delete everywhere": tombstone the cloud copy FIRST (via
+     * [tombstoneRemote]) so every other signed-in device drops it on next pull,
+     * then remove the local row + its WAV. There is no this-device-only delete
+     * and no audio-only delete any more — a transcript and its recording die
+     * together.
+     *
+     * [ids] is filtered down to rows THIS device owns ([RecordingDao.ownedAmong],
+     * `remote = 0`) — a `remote` row that slips in (it shouldn't; the UI hides
+     * the affordance) is silently skipped, never tombstoned, so a client can
+     * never delete another device's history. A row whose WAV is already gone
+     * deletes quietly (the file delete is best-effort). Signed-out / BYOK mode:
+     * [tombstoneRemote] is inert without a session, so this is a pure local
+     * delete, exactly as before accounts existed.
+     */
+    suspend fun deleteOwned(ids: List<String>) {
         if (ids.isEmpty()) return
-        for (row in dao.getPathsForIds(ids)) {
+        val owned = dao.ownedAmong(ids)
+        if (owned.isEmpty()) return
+        runCatching { tombstoneRemote?.invoke(owned) }
+        for (row in dao.getPathsForIds(owned)) {
             runCatching { File(row.audioPath).delete() }
         }
+        dao.deleteIds(owned)
     }
 
-    /**
-     * "Transcripts" delete, per `SYNC_DESIGN.md`'s delete rework:
-     * - [DeleteScope.THIS_DEVICE]: remove the local rows (+ their WAVs) and
-     *   record the ids in `sync_exclusions` so the next pull doesn't
-     *   resurrect them — the cloud copy (and other devices') is untouched.
-     * - [DeleteScope.EVERYWHERE]: best-effort tombstone the cloud rows FIRST
-     *   (via [tombstoneRemote], wired to [com.wisprfox.android.sync.SyncEngine]
-     *   by the container), then remove locally. Every other signed-in device
-     *   applies the same tombstone on its next pull.
-     */
-    suspend fun deleteTranscripts(ids: List<String>, scope: DeleteScope) {
-        if (ids.isEmpty()) return
-        if (scope == DeleteScope.EVERYWHERE) {
-            runCatching { tombstoneRemote?.invoke(ids) }
-        }
-        for (row in dao.getPathsForIds(ids)) {
-            runCatching { File(row.audioPath).delete() }
-        }
-        dao.deleteIds(ids)
-        if (scope == DeleteScope.THIS_DEVICE) {
-            runCatching { exclusionDao?.insertAll(ids) }
-        }
-    }
+    /** "Delete all" = only THIS device's rows (SYNC_DESIGN.md): other devices'
+     *  transcripts survive locally and on the server. */
+    suspend fun deleteAllOwned() = deleteOwned(dao.listOwnedIds())
 }

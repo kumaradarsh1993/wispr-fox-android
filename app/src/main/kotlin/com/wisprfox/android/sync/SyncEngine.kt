@@ -64,6 +64,11 @@ class SyncEngine(
                 val deviceName = settingsStore.settings.first().deviceName
 
                 registerDevice(token, userId, deviceId, deviceName)
+                // Apply a pending account-purge BEFORE trusting any local or
+                // pulled note (SYNC_DESIGN.md Purge "Apply purge on sync"). This
+                // covers login too: sign-in kicks syncNow(initial=true), so the
+                // marker is checked the first time a signed-in session syncs.
+                applyPurgeIfNeeded(token, userId)
                 if (initial) recordings.markAllDoneDirtyForInitialSync()
                 pushNotes(token, userId, deviceId)
                 pullNotes(token, userId)
@@ -99,6 +104,112 @@ class SyncEngine(
                 runCatching { client.newCall(request).execute().close() }
             }
         }
+    }
+
+    // ─── purge (SYNC_DESIGN.md "Purge — protocol v1") ────────────────────────
+
+    /**
+     * Initiate a purge: the one operation allowed to cross device ownership —
+     * a deliberate "reset my whole account history everywhere" that also clears
+     * undeletable orphans (rows whose originating device is gone). Destructive
+     * and irreversible; the UI gates it behind press-and-hold + a confirm dialog.
+     *
+     * Order matters: the marker is written BEFORE the hard delete so that even
+     * if the bulk delete half-fails, other devices still see `purged_at` and
+     * wipe themselves on their next sync (the marker, not the empty table, is
+     * what propagates). Then this device wipes locally and records the marker as
+     * already-applied so its own next sync doesn't re-wipe.
+     */
+    suspend fun purgeEverywhere(): Result<Unit> = withContext(Dispatchers.IO) {
+        if (!SupabaseConfig.isConfigured() || !authManager.isSignedIn()) {
+            return@withContext Result.failure(IllegalStateException("Sign in to purge across devices."))
+        }
+        mutex.withLock {
+            runCatching {
+                val token = authManager.getValidAccessToken()
+                    ?: throw IllegalStateException("Couldn't reach your account — try again.")
+                val userId = authManager.state.value.userId
+                    ?: throw IllegalStateException("Couldn't reach your account — try again.")
+                val t = SyncTime.nowIso()
+
+                // 1) Marker first (upsert user_settings['purged_at'] = t).
+                upsertPurgedAt(token, userId, t)
+                // 2) Best-effort hard DELETE of every note the user owns. RLS
+                //    scopes to the user, so this clears this device's rows, other
+                //    devices' rows, and orphans in one shot. A failure here is
+                //    swallowed — the marker already went up, so propagation still
+                //    happens and the next sync round can retry the delete.
+                runCatching { hardDeleteAllNotes(token, userId) }
+                // 3) Wipe locally + record the marker as applied, and advance the
+                //    notes cursor to t so the post-purge pull only sees genuinely
+                //    new activity.
+                recordings.deleteAll()
+                syncMetaDao.set(SyncMetaEntity(SyncMetaKeys.APPLIED_PURGE_AT, t))
+                syncMetaDao.setLong(SyncMetaKeys.NOTES_CURSOR, SyncTime.toMillis(t) ?: System.currentTimeMillis())
+            }
+        }
+    }
+
+    /**
+     * If the server's `purged_at` is newer than the marker we've already applied
+     * (RFC3339 string compare, all UTC — the shared-contract comparison), wipe
+     * every local recording + its audio and advance both the applied marker and
+     * the notes cursor to it. A fresh install (empty applied marker) seeing a
+     * `purged_at` just advances the markers — wiping empty state is a harmless
+     * no-op, not a special case.
+     */
+    private suspend fun applyPurgeIfNeeded(token: String, userId: String) {
+        val serverPurgedAt = fetchPurgedAt(token, userId)?.takeIf { it.isNotBlank() } ?: return
+        val applied = syncMetaDao.get(SyncMetaKeys.APPLIED_PURGE_AT).orEmpty()
+        if (serverPurgedAt <= applied) return
+        recordings.deleteAll()
+        syncMetaDao.set(SyncMetaEntity(SyncMetaKeys.APPLIED_PURGE_AT, serverPurgedAt))
+        syncMetaDao.setLong(SyncMetaKeys.NOTES_CURSOR, SyncTime.toMillis(serverPurgedAt) ?: System.currentTimeMillis())
+    }
+
+    /** Read `user_settings['purged_at']` for this user (null if never set). */
+    private fun fetchPurgedAt(token: String, userId: String): String? {
+        val request = Request.Builder()
+            .url("${SupabaseConfig.SUPABASE_URL}/rest/v1/user_settings?user_id=eq.$userId&key=eq.purged_at")
+            .header("apikey", SupabaseConfig.SUPABASE_ANON_KEY)
+            .header("Authorization", "Bearer $token")
+            .build()
+        return client.newCall(request).execute().use { resp ->
+            if (!resp.isSuccessful) return null
+            val bodyStr = resp.body?.string().orEmpty()
+            val rows = runCatching { json.decodeFromString(ListSerializer(RemoteSetting.serializer()), bodyStr) }
+                .getOrDefault(emptyList())
+            rows.firstOrNull { it.key == "purged_at" }?.value
+        }
+    }
+
+    private fun upsertPurgedAt(token: String, userId: String, iso: String) {
+        val setting = RemoteSetting(user_id = userId, key = "purged_at", value = iso, updated_at = iso)
+        val body = json.encodeToString(ListSerializer(RemoteSetting.serializer()), listOf(setting)).toRequestBody(JSON_MEDIA)
+        val request = Request.Builder()
+            .url("${SupabaseConfig.SUPABASE_URL}/rest/v1/user_settings")
+            .header("apikey", SupabaseConfig.SUPABASE_ANON_KEY)
+            .header("Authorization", "Bearer $token")
+            .header("Content-Type", "application/json")
+            .header("Prefer", "resolution=merge-duplicates,return=minimal")
+            .post(body)
+            .build()
+        client.newCall(request).execute().use { resp ->
+            if (!resp.isSuccessful) throw IllegalStateException("Couldn't set the purge marker (HTTP ${resp.code}).")
+        }
+    }
+
+    private fun hardDeleteAllNotes(token: String, userId: String) {
+        // PostgREST refuses an unfiltered DELETE; user_id=eq.<me> is both the
+        // required filter and (with RLS) exactly the user's own rows.
+        val request = Request.Builder()
+            .url("${SupabaseConfig.SUPABASE_URL}/rest/v1/notes?user_id=eq.$userId")
+            .header("apikey", SupabaseConfig.SUPABASE_ANON_KEY)
+            .header("Authorization", "Bearer $token")
+            .header("Prefer", "return=minimal")
+            .delete()
+            .build()
+        client.newCall(request).execute().close()
     }
 
     // ─── devices ─────────────────────────────────────────────────────────────
@@ -258,6 +369,11 @@ class SyncEngine(
             runCatching { json.decodeFromString(ListSerializer(RemoteSetting.serializer()), bodyStr) }.getOrDefault(emptyList())
         }
         for (row in rows) {
+            // Only provider-key rows are adopted. Any other user_settings row —
+            // notably the purge marker `purged_at` — falls through this `continue`
+            // and is never written to the keystore or pushed back up: it's
+            // read-on-sync by applyPurgeIfNeeded / write-on-purge only, never an
+            // API key.
             val mapping = keyMappings.firstOrNull { it.settingKey == row.key } ?: continue
             val value = row.value?.takeIf { it.isNotBlank() } ?: continue
             val remoteMs = SyncTime.toMillis(row.updated_at) ?: continue

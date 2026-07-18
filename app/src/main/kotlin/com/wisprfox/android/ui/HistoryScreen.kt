@@ -66,7 +66,6 @@ import androidx.compose.ui.unit.dp
 import com.wisprfox.android.WisprFoxApp
 import com.wisprfox.android.core.AltVersionGenerator
 import com.wisprfox.android.history.AltKind
-import com.wisprfox.android.history.DeleteScope
 import com.wisprfox.android.history.Recording
 import com.wisprfox.android.history.RecordingStatus
 import com.wisprfox.android.provider.DictationMode
@@ -103,9 +102,6 @@ fun HistoryScreen(onBack: () -> Unit, onOpenHome: () -> Unit) {
     val recordings by container.recordings.observeRecent().collectAsState(initial = emptyList())
     val player = rememberAudioPlayer()
 
-    val authState by container.authManager.state.collectAsState()
-    val signedIn = authState.signedIn
-
     // rememberSaveable: select mode and the query survive process death, which
     // `remember` did not.
     var selectMode by rememberSaveable { mutableStateOf(false) }
@@ -121,22 +117,17 @@ fun HistoryScreen(onBack: () -> Unit, onOpenHome: () -> Unit) {
         selected.clear()
     }
 
-    // Shared delete applier for the bulk paths (delete-all + multi-select) —
-    // routes the DeleteDialog's choices to the repository the same way the
-    // per-row path does, so semantics never diverge between the three surfaces.
-    //
-    // The branch order looks like it drops `voiceFiles` when both are checked,
-    // but it doesn't: RecordingRepository.deleteTranscripts already unlinks each
-    // row's WAV before deleting the row, so "transcripts" is a strict superset of
-    // "voice files". Verified against the repository, not assumed.
-    fun applyDelete(ids: List<String>, voiceFiles: Boolean, transcripts: Boolean, scope2: DeleteScope) {
-        scope.launch {
-            when {
-                transcripts -> container.recordings.deleteTranscripts(ids, scope2)
-                voiceFiles -> container.recordings.deleteAudioOnly(ids)
-            }
-        }
+    // Ownership-scoped delete (SYNC_DESIGN.md): deleting an owned row removes it
+    // locally AND tombstones the server copy so it's gone from every signed-in
+    // device. deleteOwned filters to this device's rows, so passing a mixed
+    // selection can never touch another device's history. One applier for the
+    // bulk paths (delete-all + multi-select); the per-row path calls the same.
+    fun applyDelete(ids: List<String>) {
+        scope.launch { container.recordings.deleteOwned(ids) }
     }
+
+    // "Delete all" means all of THIS device's rows only — remote rows survive.
+    val ownedIds = remember(recordings) { recordings.filter { !it.remote }.map { it.id } }
 
     val visible = remember(recordings, query) {
         if (query.isBlank()) recordings
@@ -187,8 +178,11 @@ fun HistoryScreen(onBack: () -> Unit, onOpenHome: () -> Unit) {
                             }
                             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                                 DropdownMenuItem(
+                                    // "Delete all" is this device's rows only; if
+                                    // every row is synced-from-elsewhere there's
+                                    // nothing here we're allowed to delete.
                                     text = { Text("Delete all", color = MaterialTheme.colorScheme.error) },
-                                    enabled = recordings.isNotEmpty(),
+                                    enabled = ownedIds.isNotEmpty(),
                                     leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
                                     onClick = { menuOpen = false; confirmDeleteAll = true },
                                 )
@@ -243,7 +237,6 @@ fun HistoryScreen(onBack: () -> Unit, onOpenHome: () -> Unit) {
                                 rec = rec,
                                 player = player,
                                 selectMode = selectMode,
-                                signedIn = signedIn,
                                 checked = selected[rec.id] == true,
                                 onToggleSelect = { selected[rec.id] = !(selected[rec.id] ?: false) },
                             )
@@ -255,28 +248,29 @@ fun HistoryScreen(onBack: () -> Unit, onOpenHome: () -> Unit) {
     }
 
     if (confirmDeleteAll) {
-        val ids = recordings.map { it.id }
         DeleteDialog(
-            itemCount = ids.size,
-            signedIn = signedIn,
+            itemCount = ownedIds.size,
             onDismiss = { confirmDeleteAll = false },
-            onConfirm = { voiceFiles, transcripts, delScope ->
+            onConfirm = {
                 confirmDeleteAll = false
-                applyDelete(ids, voiceFiles, transcripts, delScope)
+                applyDelete(ownedIds)
                 exitSelectMode()
             },
         )
     }
 
     if (confirmDeleteSelected) {
-        val ids = selected.filter { it.value }.keys.toList()
+        // Defensive: only owned rows are selectable (remote rows have no
+        // checkbox), but filter again so a stray remote id can never slip in.
+        val ids = selected.filter { it.value }.keys.filter { id ->
+            recordings.firstOrNull { it.id == id }?.remote == false
+        }
         DeleteDialog(
             itemCount = ids.size,
-            signedIn = signedIn,
             onDismiss = { confirmDeleteSelected = false },
-            onConfirm = { voiceFiles, transcripts, delScope ->
+            onConfirm = {
                 confirmDeleteSelected = false
-                applyDelete(ids, voiceFiles, transcripts, delScope)
+                applyDelete(ids)
                 exitSelectMode()
             },
         )
@@ -321,7 +315,6 @@ private fun HistoryRow(
     rec: Recording,
     player: AudioPlayerState,
     selectMode: Boolean,
-    signedIn: Boolean,
     checked: Boolean,
     onToggleSelect: () -> Unit,
 ) {
@@ -350,16 +343,20 @@ private fun HistoryRow(
                     .fillMaxWidth()
                     .heightIn(min = if (selectMode) Sizes.touch else 0.dp)
                     .combinedClickable(
-                        onClick = { if (selectMode) onToggleSelect() else expanded = !expanded },
-                        // Long-press opens the delete dialog straight for this row
-                        // (SYNC_DESIGN.md press-and-hold delete), unless we're in
-                        // multi-select where a long-press has no separate meaning.
-                        onLongClick = { if (!selectMode) confirmDelete = true },
+                        // Remote rows (synced from another device) aren't ours to
+                        // delete, so they're not selectable and have no long-press
+                        // delete — the affordance is hidden, not just disabled.
+                        onClick = {
+                            if (selectMode) { if (!rec.remote) onToggleSelect() } else expanded = !expanded
+                        },
+                        // Long-press = press-and-hold delete for an owned row
+                        // (SYNC_DESIGN.md), the confirm dialog being the gate.
+                        onLongClick = { if (!selectMode && !rec.remote) confirmDelete = true },
                     ),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Space.md),
             ) {
-                if (selectMode) {
+                if (selectMode && !rec.remote) {
                     Icon(
                         if (checked) Icons.Filled.CheckBox else Icons.Filled.CheckBoxOutlineBlank,
                         contentDescription = null,
@@ -467,11 +464,15 @@ private fun HistoryRow(
                             ) else AssistChipDefaults.assistChipColors(),
                         )
                     }
-                    AssistChip(
-                        onClick = { confirmDelete = true },
-                        label = { Text("Delete") },
-                        leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
-                    )
+                    // Delete only appears on rows this device owns — a remote row
+                    // can't be deleted from here (SYNC_DESIGN.md ownership rule).
+                    if (!rec.remote) {
+                        AssistChip(
+                            onClick = { confirmDelete = true },
+                            label = { Text("Delete") },
+                            leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+                        )
+                    }
                 }
                 rec.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
             }
@@ -493,18 +494,10 @@ private fun HistoryRow(
     if (confirmDelete) {
         DeleteDialog(
             itemCount = 1,
-            signedIn = signedIn,
             onDismiss = { confirmDelete = false },
-            onConfirm = { voiceFiles, transcripts, delScope ->
+            onConfirm = {
                 confirmDelete = false
-                val ids = listOf(rec.id)
-                scope.launch {
-                    // Same superset relationship as applyDelete above.
-                    when {
-                        transcripts -> container.recordings.deleteTranscripts(ids, delScope)
-                        voiceFiles -> container.recordings.deleteAudioOnly(ids)
-                    }
-                }
+                scope.launch { container.recordings.deleteOwned(listOf(rec.id)) }
             },
         )
     }

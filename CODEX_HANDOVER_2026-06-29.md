@@ -1,3 +1,12 @@
+> ## 🗄 ARCHIVED — historical record only (do not action)
+>
+> The Codex agent is retired. This is a **dated 2026-06-29 checkpoint** kept for
+> the audit trail: the owner's original prompt and what Codex changed on the way
+> to the `v1.2.0-codex.2` preview. **Everything below is superseded** — that
+> preview was overtaken by Claude stable `v1.4.0` and the `v2.x` accounts/sync
+> line. For current state read [HANDOVER.md](./HANDOVER.md); nothing still-live
+> is unique to this file. Do not treat its "Follow-up" list as open work.
+
 # Codex Handover - 2026-06-29
 
 ## User prompt that triggered this checkpoint

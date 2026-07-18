@@ -23,6 +23,17 @@ data class SyncMetaEntity(
 object SyncMetaKeys {
     /** Max `updated_at` (epoch millis, as a string) seen across pulled notes. */
     const val NOTES_CURSOR = "notes_pull_cursor"
+
+    /**
+     * Purge protocol v1 (shared across all three clients — see
+     * `../wispr-fox-web/docs/SYNC_DESIGN.md`). The RFC3339 UTC marker of the
+     * last account-purge this device has already applied; empty ⇒ never applied.
+     * Compared against the server's `user_settings['purged_at']` on each sync;
+     * when the server's is newer, this device wipes all local recordings and
+     * advances this to match. Stored as the raw RFC3339 string, not epoch millis.
+     */
+    const val APPLIED_PURGE_AT = "applied_purge_at"
+
     fun keyPushedAt(providerKeyName: String) = "keypush_$providerKeyName"
 }
 

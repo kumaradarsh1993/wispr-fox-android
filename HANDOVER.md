@@ -1,8 +1,46 @@
 # HANDOVER - wispr-fox-android
 
-> Last update: 2026-07-16. Active nightly: **v2.0.0-nightly.1** (accounts + cross-device sync). Current stable: **v1.4.0** (audio-file import). Last stable before this: v1.1.0 at commit `4cf396b`.
+> Last update: 2026-07-17. Active nightly: **v2.1.0-nightly.1** (UI redesign on a real design system + three bug fixes). Previous nightly: **v2.0.0-nightly.1** (accounts + cross-device sync). Current stable: **v1.4.0** (audio-file import). Last stable before this: v1.1.0 at commit `4cf396b`.
 
-This file is the current state-of-the-world for Android. `CLAUDE.md` is useful historical context, but this handover wins when they disagree. The full audit + rationale behind the v1.3.0 batch lives in `docs/AUDIT_2026-07-06_FABLE.md` — read it before touching overlay/delivery/pipeline code.
+This file is the current state-of-the-world for Android. `CLAUDE.md` is useful historical context, but this handover wins when they disagree. The full audit + rationale behind the v1.3.0 batch lives in `docs/AUDIT_2026-07-06_FABLE.md` — read it before touching overlay/delivery/pipeline code. The 2026-07-17 UX/UI audit that drove the v2.1.0 redesign is `docs/AUDIT_2026-07-17_ANDROID.md`.
+
+## Sibling apps (one product, three clients)
+
+wispr-fox is three clients sharing one Supabase backend. Keep this block in sync across all three handovers.
+
+- **Desktop** — `../wispr-fox/HANDOVER.md` (Tauri 2 + Rust + Svelte 5, Windows/macOS)
+- **Web** — `../wispr-fox-web/HANDOVER.md` (SvelteKit on Vercel)
+- **Android** — `./HANDOVER.md` (Kotlin + Jetpack Compose) ← you are here
+
+Shared backend spec: `../wispr-fox-web/docs/SYNC_DESIGN.md` · one-time account/backend setup: `../wispr-fox-web/SETUP_ACCOUNTS.md` (secrets in the gitignored `../wispr-fox-web/SECRETS.local.md`).
+
+## What changed in v2.1.0-nightly.1 (UI redesign + three bug fixes) — SHIPPED 2026-07-17
+
+Tag `v2.1.0-nightly.1` (commits `d88588b` redesign, `3dfff9f` bug fixes); `versionName = "2.1.0"`, `versionCode = 16`. Driven by the read-only audit `docs/AUDIT_2026-07-17_ANDROID.md`; user-facing notes in `docs/RELEASE_NOTES_v2.1.0-nightly.1.md`. Still a nightly — no on-device QA yet.
+
+- **A real design system.** Every screen rebuilt on one spacing/type scale (`ui/Design.kt`), replacing the four-different-page-margins / nine-different-card-paddings mess the audit catalogued.
+- **Dark theme, finally.** The three desktop palettes (Foxy cream / Dark / Retro) plus an Auto option; Material You available but off by default (`ui/Theme.kt` now has `darkColorScheme` / `isSystemInDarkTheme`; `ui/ThemePrefs.kt`). Android previously shipped exactly one light scheme.
+- **Settings rebuilt as hub-and-spoke** (`ui/settings/`): eight rows (Transcription, Cleanup & modes, Foxy, Delivery, Usage, Storage, Account, About), each opening its own sub-page, each showing its current value. Only the key field for the *selected* provider is shown; the rest sit behind an expander. Replaces the 130-line flat scroll with seven always-on API-key fields.
+- **Home/History decluttered**, onboarding no longer draws under the status bar (edge-to-edge inset handling).
+- **Three bug fixes** (`3dfff9f`): the overlay avatar no longer drifts right when the menu/bubble/label appears (fox-centre X is now the persisted anchor); a failed transcription no longer wedges the pipeline so recording stays locked; and auto-paste stops falsely reporting success — it now verifies the text actually landed before saying "Pasted" (was treating `performAction() == true` as proof).
+- Verified by the automated suite (83 tests) + the build only. **Real-device QA (S23 Ultra) still owed** — including the paste-timing double-paste risk called out in the release notes.
+
+## STILL PENDING on Android — sprite packs + pet animations
+
+The owner's sprite/"the fire" complaint is only partly addressed. Per `docs/AUDIT_2026-07-17_ANDROID.md` P1-3:
+
+- **`codex-fox` and `spark-buddy` raster packs do not exist on Android at all** (confirmed: no `codex*`/`spark*` drawables in `app/src/main/res/drawable-nodpi/`; `settings/Avatar.kt` is still `{ FOX, CLIPPY, ORU_GUJIA, SIRI }`). The web client has all three packs (`codex-fox`, `oru-gujia`, `spark-buddy`) **plus** the terminal pets; Android has only the legacy 5-state watercolour fox + Oru & Gujia.
+- **Raster avatars still get one shared `breathe` scale and a hard PNG cut** — no per-state animation and no crossfade, unlike the Compose-drawn Clippy/Siri avatars. Porting the desktop's data-driven `avatar.json` pack model + an animation layer is the outstanding work (audit P1-3 has the plan).
+- `oru-gujia/sleeping.png` and an idle-timeout to drive a sleeping state are also unported.
+
+## Delete policy — migrated to ownership-scoped + Purge (2026-07-17)
+
+The What/Where matrix is **gone**. Android now follows the shared rule (canonical spec: `../wispr-fox-web/docs/SYNC_DESIGN.md`, "Delete — ownership-scoped (v2…)" + "Purge"):
+
+- **A client may delete only rows it originated.** Ownership on Android = `remote == false` (a pulled row is stamped `remote=1` once in `RecordingRepository.applyRemoteNote` and never flips back; there is no per-row `device_id` on the Room entity, so `remote` is the origin signal). `RecordingDao.ownedAmong` enforces it at the DB, not just the UI. `deleteOwned`/`deleteAllOwned` replaced `deleteTranscripts`/`deleteAudioOnly`; transcript + WAV die together; a missing WAV deletes quietly. `HistoryScreen` hides every delete affordance on `remote` rows and scopes "delete all" to owned rows. `DeleteDialog.kt` is a single ownership-scoped confirm (long-press → dialog).
+- **Purge** (`SyncEngine.purgeEverywhere`, Account spoke in `ui/settings/SystemSpokes.kt`, `HoldToConfirmButton` + confirm): stamps `user_settings['purged_at']`, best-effort hard-deletes all notes, wipes local, advances `applied_purge_at` (new `SyncMetaKeys` value) + notes cursor. `applyPurgeIfNeeded` runs at the head of `syncNow` (covers login + every sync) and wipes local when server `purged_at` advances — the account-wide reset that also clears orphans.
+- `sync_exclusions` is now unused by delete (writes removed; table/DAO left in place to avoid a Room migration). **No schema change** — `applied_purge_at` rides the existing `sync_meta` KV; version stays 5.
+- **Runtime-unverified**: `./gradlew testDebugUnitTest` is green, but the PostgREST delete/purge/tombstone calls were never exercised against a live backend. One sharp edge worth confirming intended: signing an existing device (with local history) into an already-purged account wipes that device's local history to match the reset.
 
 ## What changed in v2.0.0-nightly.1 (accounts + cross-device sync)
 

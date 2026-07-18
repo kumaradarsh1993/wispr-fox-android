@@ -7,10 +7,14 @@ import android.os.PowerManager
 import android.provider.Settings
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -22,6 +26,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -29,7 +34,9 @@ import com.wisprfox.android.BuildConfig
 import com.wisprfox.android.WisprFoxApp
 import com.wisprfox.android.delivery.WisprFoxAccessibilityService
 import com.wisprfox.android.settings.AppSettings
+import com.wisprfox.android.sync.SupabaseConfig
 import com.wisprfox.android.ui.AccountSection
+import com.wisprfox.android.ui.HoldToConfirmButton
 import com.wisprfox.android.ui.PermissionCard
 import com.wisprfox.android.ui.SectionCard
 import com.wisprfox.android.ui.Space
@@ -205,10 +212,86 @@ fun StorageSpoke(onBack: () -> Unit) {
 fun AccountSpoke(onBack: () -> Unit) {
     val ctx = LocalContext.current
     val container = remember { WisprFoxApp.container(ctx) }
+    val authState by container.authManager.state.collectAsState()
     SpokeScaffold("Account", onBack) {
         SectionCard {
             AccountSection(container)
         }
+        // Purge sits at the very bottom of Account (SYNC_DESIGN.md), and only
+        // when signed in — it's an account-wide, cross-device reset, meaningless
+        // without a session.
+        if (SupabaseConfig.isConfigured() && authState.signedIn) {
+            PurgeSection(container.syncEngine)
+        }
+    }
+}
+
+/**
+ * Purge — the one operation allowed to cross device ownership (SYNC_DESIGN.md
+ * "Purge"). Wipes every transcript on the account, on this phone and on every
+ * other device (including ones the user no longer has), plus orphaned rows whose
+ * originating device is gone. Irreversible, so it's gated twice: press-and-hold
+ * to arm, then an explicit confirm dialog whose copy states the blast radius
+ * plainly. Audio-only local files are wiped too (they die with their rows).
+ */
+@Composable
+private fun PurgeSection(syncEngine: com.wisprfox.android.sync.SyncEngine) {
+    val scope = rememberCoroutineScope()
+    var confirming by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf<String?>(null) }
+
+    SectionCard("Danger zone") {
+        Text(
+            "Purge account history",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.error,
+        )
+        Text(
+            "Permanently deletes every transcript on your account — this phone and every other signed-in device, including devices you no longer have. This cannot be undone.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        HoldToConfirmButton(
+            text = if (busy) "Purging…" else "Hold to purge everything",
+            enabled = !busy,
+            onHoldComplete = { confirming = true },
+        )
+        status?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+
+    if (confirming) {
+        AlertDialog(
+            onDismissRequest = { confirming = false },
+            title = { Text("Purge everything, everywhere?") },
+            text = {
+                Text(
+                    "This permanently deletes every transcript on your account across ALL devices — including devices you no longer have — and clears orphaned recordings. It cannot be undone. Audio on this phone is deleted too.",
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        confirming = false
+                        busy = true
+                        status = null
+                        scope.launch {
+                            val result = syncEngine.purgeEverywhere()
+                            busy = false
+                            status = result.fold(
+                                onSuccess = { "History purged everywhere. Other devices will catch up on their next sync." },
+                                onFailure = { it.message ?: "Purge failed — nothing was changed. Try again." },
+                            )
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                ) { Text("Purge everything") }
+            },
+            dismissButton = { TextButton(onClick = { confirming = false }) { Text("Cancel") } },
+        )
     }
 }
 
