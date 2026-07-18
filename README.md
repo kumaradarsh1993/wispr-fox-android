@@ -6,7 +6,7 @@ Built for **Indian English + Hindi code-switching**, long ramble-y recordings, a
 
 Website: https://kumaradarsh1993.github.io/wispr-fox-android/
 
-**Download:** the **[Releases page](https://github.com/kumaradarsh1993/wispr-fox-android/releases)** always has the latest APK + notes. Current stable: **v1.4.0** (audio-file import). Latest nightly: **v2.1.0-nightly.1** (UI redesign + bug fixes, on top of the v2.0.0 accounts/sync line).
+**Download:** the **[Releases page](https://github.com/kumaradarsh1993/wispr-fox-android/releases)** always has the latest APK + notes. Current stable: **v2.1.0** (accounts + cross-device sync, UI redesign + dark theme, ownership-scoped delete + Purge).
 
 ---
 
@@ -64,6 +64,4 @@ CI builds on every tag push (`v*`) and attaches an installable APK to the GitHub
 
 ## Current version
 
-**Stable: v1.4.0** — import existing audio files through the transcribe → clean/draft pipeline (on top of multi-provider STT, OpenAI cleanup, safer recording/paste, and the Fable reliability batch).
-
-**Latest nightly: v2.1.0-nightly.1** — optional accounts + cross-device transcript sync (v2.0.0 line), then a full UI redesign on a real design system with dark theme, plus fixes for avatar drift, a wedging pipeline, and auto-paste falsely reporting success. See the Releases page for notes.
+**Stable: v2.1.0** — optional accounts + cross-device transcript sync (your audio stays on the phone), a full UI redesign on a real design system with a dark theme, and ownership-scoped delete + a Purge reset shared with the desktop and web apps. Builds on v1.4.0's audio-file import, multi-provider STT, OpenAI cleanup, and the Fable reliability batch. See the Releases page for notes.
