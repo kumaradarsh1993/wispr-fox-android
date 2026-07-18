@@ -81,28 +81,36 @@ class SyncEngine(
 
     /** Best-effort cloud tombstone for "delete everywhere" — wired into
      *  [RecordingRepository] as a lambda so that package stays sync-agnostic.
-     *  Deliberately swallows its own errors: a failed tombstone just means the
-     *  next sync round retries (the row is already gone locally by then, so a
-     *  transient failure here doesn't leave the user's phone in a weird state,
-     *  only delays the other devices seeing the deletion). */
+     *  Scoped to this device with `&device_id=eq.<deviceId>` (SYNC_DESIGN.md
+     *  "Delete — ownership-scoped": the device_id equality check is what
+     *  carries the delete policy server-side, mirrored from desktop's
+     *  `tombstone_remote` in `../wispr-fox/src-tauri/src/sync/engine.rs`) —
+     *  [ids] is already filtered to owned rows by [RecordingRepository], but
+     *  the PATCH itself must not be *capable* of reaching another device's
+     *  rows either. A single batched PATCH (`id=in.(...)`) replaces the old
+     *  per-id loop, same as desktop. Deliberately swallows its own errors: a
+     *  failed tombstone just means the next sync round retries (the row is
+     *  already gone locally by then, so a transient failure here doesn't
+     *  leave the user's phone in a weird state, only delays the other
+     *  devices seeing the deletion). */
     suspend fun tombstoneNotes(ids: List<String>): Unit = withContext(Dispatchers.IO) {
         if (ids.isEmpty() || !SupabaseConfig.isConfigured() || !authManager.isSignedIn()) return@withContext
         runCatching {
             val token = authManager.getValidAccessToken() ?: return@runCatching
+            val deviceId = settingsStore.deviceId()
             val nowIso = SyncTime.nowIso()
-            for (id in ids) {
-                val body = """{"deleted_at":"$nowIso","transcript":null,"cleaned_text":null,"drafted_text":null,"title":null,"updated_at":"$nowIso"}"""
-                    .toRequestBody(JSON_MEDIA)
-                val request = Request.Builder()
-                    .url("${SupabaseConfig.SUPABASE_URL}/rest/v1/notes?id=eq.$id")
-                    .header("apikey", SupabaseConfig.SUPABASE_ANON_KEY)
-                    .header("Authorization", "Bearer $token")
-                    .header("Content-Type", "application/json")
-                    .header("Prefer", "return=minimal")
-                    .patch(body)
-                    .build()
-                runCatching { client.newCall(request).execute().close() }
-            }
+            val idList = ids.joinToString(",")
+            val body = """{"deleted_at":"$nowIso","transcript":null,"cleaned_text":null,"drafted_text":null,"title":null,"updated_at":"$nowIso"}"""
+                .toRequestBody(JSON_MEDIA)
+            val request = Request.Builder()
+                .url("${SupabaseConfig.SUPABASE_URL}/rest/v1/notes?id=in.($idList)&device_id=eq.$deviceId")
+                .header("apikey", SupabaseConfig.SUPABASE_ANON_KEY)
+                .header("Authorization", "Bearer $token")
+                .header("Content-Type", "application/json")
+                .header("Prefer", "return=minimal")
+                .patch(body)
+                .build()
+            runCatching { client.newCall(request).execute().close() }
         }
     }
 
