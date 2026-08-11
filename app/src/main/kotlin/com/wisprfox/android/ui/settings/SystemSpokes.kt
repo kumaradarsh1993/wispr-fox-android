@@ -32,6 +32,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.wisprfox.android.BuildConfig
+import com.wisprfox.android.update.isReleaseNewer
 import com.wisprfox.android.WisprFoxApp
 import com.wisprfox.android.delivery.WisprFoxAccessibilityService
 import com.wisprfox.android.settings.AppSettings
@@ -236,9 +237,14 @@ fun StorageSpoke(onBack: () -> Unit) {
         confirmButton = { Button(onClick = {
             confirmClearAudio = false
             scope.launch {
+                container.importController.cancelQueuedWorkAndClearSources()
                 container.recordings.clearAllAudio()
-                container.importController.clearStaged()
-                storage = container.recordings.audioStorage()
+                val recorded = container.recordings.audioStorage()
+                val staged = container.importController.stagedStorage()
+                storage = com.wisprfox.android.history.RecordingRepository.AudioStorage(
+                    recorded.files + staged.first,
+                    recorded.bytes + staged.second,
+                )
             }
         }) { Text("Clear audio") } },
         dismissButton = { TextButton(onClick = { confirmClearAudio = false }) { Text("Cancel") } },
@@ -353,7 +359,7 @@ fun AboutSpoke(onBack: () -> Unit, onReplayOnboarding: () -> Unit) {
     SpokeScaffold("About", onBack) {
         SectionCard("wispr-fox for Android") {
             Text(
-                "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · ${BuildConfig.RELEASE_CHANNEL}",
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
@@ -439,25 +445,13 @@ private suspend fun fetchReleases(): ReleaseSnapshot = withContext(Dispatchers.I
             stableTag,
             stable?.jsonObject?.get("html_url")?.jsonPrimitive?.content,
             apk(stable),
-            isNewer(stableTag, BuildConfig.VERSION_NAME),
+            isReleaseNewer(stableTag, BuildConfig.RELEASE_TAG),
             nightlyTag,
             nightly?.jsonObject?.get("html_url")?.jsonPrimitive?.content,
             apk(nightly),
-            isNewer(nightlyTag, BuildConfig.VERSION_NAME),
+            isReleaseNewer(nightlyTag, BuildConfig.RELEASE_TAG),
         )
     }
-}
-
-private fun isNewer(tag: String?, current: String): Boolean {
-    fun parts(value: String): List<Int> = value.removePrefix("v").substringBefore('-')
-        .split('.').map { it.toIntOrNull() ?: 0 }
-    val candidate = tag?.let(::parts) ?: return false
-    val installed = parts(current)
-    val count = maxOf(candidate.size, installed.size)
-    return (0 until count).firstNotNullOfOrNull { index ->
-        val difference = candidate.getOrElse(index) { 0 } - installed.getOrElse(index) { 0 }
-        difference.takeIf { it != 0 }
-    }?.let { it > 0 } ?: false
 }
 
 /* ── helpers ─────────────────────────────────────────────────────────────── */

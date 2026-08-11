@@ -71,7 +71,7 @@ class ImportWorker(
         recordings.setDuration(id, result.durationMs)
         recordings.setStatus(id, RecordingStatus.TRANSCRIBING)
         if (inputData.getBoolean(KEY_AUTO_TRANSCRIBE, true)) {
-            TranscribeWorker.enqueue(applicationContext, id)
+            TranscribeWorker.enqueue(applicationContext, id, importedPipeline = true)
         }
         Result.success()
     }
@@ -174,6 +174,7 @@ class ImportWorker(
         const val KEY_SOURCE_URI = "source_uri"
         const val KEY_AUTO_TRANSCRIBE = "auto_transcribe"
         private const val UNIQUE_PREFIX = "import-"
+        const val PIPELINE_TAG = "import-audio-pipeline"
 
         /** Enqueue a durable decode job for a freshly-created import row. */
         fun enqueue(context: Context, recordingId: String, sourceUri: String) {
@@ -194,10 +195,10 @@ class ImportWorker(
                 "$UNIQUE_PREFIX-batch-$batchId",
                 ExistingWorkPolicy.KEEP,
                 request(first.first, first.second, autoTranscribe = false),
-            ).then(TranscribeWorker.request(first.first))
+            ).then(TranscribeWorker.request(first.first, importedPipeline = true))
             jobs.drop(1).forEach { (recordingId, sourceUri) ->
                 chain = chain.then(request(recordingId, sourceUri, autoTranscribe = false))
-                    .then(TranscribeWorker.request(recordingId))
+                    .then(TranscribeWorker.request(recordingId, importedPipeline = true))
             }
             chain.enqueue()
         }
@@ -211,6 +212,7 @@ class ImportWorker(
                         KEY_AUTO_TRANSCRIBE to autoTranscribe,
                     )
                 )
+                .addTag(PIPELINE_TAG)
                 .build()
     }
 }

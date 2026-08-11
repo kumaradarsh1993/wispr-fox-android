@@ -100,7 +100,8 @@ class AppContainer(context: Context) {
             secrets = secrets,
         )
     }
-    val providerFactory: ProviderFactory by lazy { ProviderFactory(http, secrets) }
+    val providerKeys: ProviderKeyReadiness by lazy { ProviderKeyReadiness(secrets) }
+    val providerFactory: ProviderFactory by lazy { ProviderFactory(http, providerKeys) }
     val delivery: DeliveryManager by lazy { DeliveryManager(app) }
     val controller: RecordingController by lazy {
         RecordingController(app, recordings, settingsStore, applicationScope)

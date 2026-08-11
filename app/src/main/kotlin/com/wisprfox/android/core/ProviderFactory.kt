@@ -11,7 +11,6 @@ import com.wisprfox.android.provider.groq.GroqWhisperClient
 import com.wisprfox.android.provider.openai.OpenAiLlmClient
 import com.wisprfox.android.provider.openai.OpenAiSttClient
 import com.wisprfox.android.settings.AppSettings
-import com.wisprfox.android.settings.SecureKeyStore
 import okhttp3.OkHttpClient
 
 /** Thrown when a required BYOK key is absent. Surfaced as a friendly message. */
@@ -26,48 +25,45 @@ class MissingKeyException(val providerLabel: String) :
  */
 class ProviderFactory(
     private val http: OkHttpClient,
-    private val secrets: SecureKeyStore,
+    private val keys: ProviderKeyReadiness,
 ) {
     fun stt(settings: AppSettings): SttProvider = when (settings.sttProvider) {
         ProviderCatalog.STT_OPENAI -> {
-            val key = secrets.get(SecureKeyStore.Key.OpenAiStt)?.takeIf { it.isNotBlank() }
-                ?: secrets.get(SecureKeyStore.Key.OpenAiLlm)?.takeIf { it.isNotBlank() }
-                ?: throw MissingKeyException("OpenAI (speech-to-text)")
+            val resolution = keys.stt(settings.sttProvider)
+            val key = resolution.value ?: throw MissingKeyException(resolution.providerLabel)
             OpenAiSttClient(http, key, ProviderCatalog.sanitizeSttModel(settings.sttProvider, settings.sttModel))
         }
         ProviderCatalog.STT_DEEPGRAM -> {
-            val key = secrets.get(SecureKeyStore.Key.DeepgramStt)?.takeIf { it.isNotBlank() }
-                ?: throw MissingKeyException("Deepgram")
+            val resolution = keys.stt(settings.sttProvider)
+            val key = resolution.value ?: throw MissingKeyException(resolution.providerLabel)
             DeepgramSttClient(http, key, ProviderCatalog.sanitizeSttModel(settings.sttProvider, settings.sttModel))
         }
         ProviderCatalog.STT_ELEVENLABS -> {
-            val key = secrets.get(SecureKeyStore.Key.ElevenLabsStt)?.takeIf { it.isNotBlank() }
-                ?: throw MissingKeyException("ElevenLabs")
+            val resolution = keys.stt(settings.sttProvider)
+            val key = resolution.value ?: throw MissingKeyException(resolution.providerLabel)
             ElevenLabsSttClient(http, key, ProviderCatalog.sanitizeSttModel(settings.sttProvider, settings.sttModel))
         }
         else -> {
-            val key = secrets.get(SecureKeyStore.Key.GroqStt)?.takeIf { it.isNotBlank() }
-                ?: throw MissingKeyException("Groq (speech-to-text)")
+            val resolution = keys.stt(settings.sttProvider)
+            val key = resolution.value ?: throw MissingKeyException(resolution.providerLabel)
             GroqWhisperClient(http, key, ProviderCatalog.sanitizeSttModel(ProviderCatalog.STT_GROQ, settings.sttModel))
         }
     }
 
     fun llm(settings: AppSettings): LlmProvider = when (settings.llmProvider) {
         AppSettings.PROVIDER_GEMINI -> {
-            val key = secrets.get(SecureKeyStore.Key.GeminiLlm)?.takeIf { it.isNotBlank() }
-                ?: throw MissingKeyException("Gemini")
+            val resolution = keys.llm(settings.llmProvider)
+            val key = resolution.value ?: throw MissingKeyException(resolution.providerLabel)
             GeminiClient(http, key, ProviderCatalog.sanitizeLlmModel(settings.llmProvider, settings.geminiModel))
         }
         AppSettings.PROVIDER_OPENAI -> {
-            val key = secrets.get(SecureKeyStore.Key.OpenAiLlm)?.takeIf { it.isNotBlank() }
-                ?: secrets.get(SecureKeyStore.Key.OpenAiStt)?.takeIf { it.isNotBlank() }
-                ?: throw MissingKeyException("OpenAI")
+            val resolution = keys.llm(settings.llmProvider)
+            val key = resolution.value ?: throw MissingKeyException(resolution.providerLabel)
             OpenAiLlmClient(http, key, ProviderCatalog.sanitizeLlmModel(settings.llmProvider, settings.openAiLlmModel))
         }
         else -> {
-            val key = secrets.get(SecureKeyStore.Key.GroqLlm)?.takeIf { it.isNotBlank() }
-                ?: secrets.get(SecureKeyStore.Key.GroqStt)?.takeIf { it.isNotBlank() }
-                ?: throw MissingKeyException("Groq (LLM)")
+            val resolution = keys.llm(settings.llmProvider)
+            val key = resolution.value ?: throw MissingKeyException(resolution.providerLabel)
             GroqChatClient(http, key, ProviderCatalog.sanitizeLlmModel(ProviderCatalog.LLM_GROQ, settings.groqLlmModel))
         }
     }

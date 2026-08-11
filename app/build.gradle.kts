@@ -25,8 +25,8 @@ android {
         applicationId = "com.wisprfox.android"
         minSdk = 31
         targetSdk = 35
-        versionCode = 18
-        versionName = "2.2.0"
+        versionCode = 19
+        versionName = "2.2.0-nightly.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -38,6 +38,8 @@ android {
         // Passphrase-encrypted owner keys for friends & family builds. Safe to
         // ship in release (useless without the passphrase). Empty when absent.
         buildConfigField("String", "FAMILY_BLOB", "\"${devKey("familyBlob")}\"")
+        buildConfigField("String", "RELEASE_CHANNEL", "\"nightly\"")
+        buildConfigField("String", "RELEASE_TAG", "\"v2.2.0-nightly.2\"")
     }
 
     buildTypes {

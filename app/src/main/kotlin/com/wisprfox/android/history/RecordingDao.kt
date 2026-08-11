@@ -79,6 +79,13 @@ interface RecordingDao {
     @Query("UPDATE recordings SET audio_path = '' WHERE id = :id")
     suspend fun clearAudioPath(id: String)
 
+    @Query(
+        "UPDATE recordings SET status = 'error', " +
+            "error = 'Local audio was cleared before this import finished.' " +
+            "WHERE imported = 1 AND status NOT IN ('done', 'error')"
+    )
+    suspend fun failActiveImportsForAudioClear()
+
     @Query("UPDATE recordings SET retry_count = retry_count + 1 WHERE id = :id")
     suspend fun bumpRetry(id: String)
 
@@ -115,7 +122,7 @@ interface RecordingDao {
     @Query(
         "UPDATE recordings SET status = 'error', " +
             "error = COALESCE(error, 'Interrupted — app exited before this recording finished. Tap Retry to resume.') " +
-            "WHERE status IN ('recording','transcribing','diarizing','cleaning','drafting','meeting_notes','injecting')"
+            "WHERE status IN ('recording','importing','transcribing','diarizing','cleaning','drafting','meeting_notes','injecting')"
     )
     suspend fun recoverStranded(): Int
 

@@ -345,8 +345,8 @@ class TranscribeWorker(
             "Something went wrong finishing that dictation - it's in History, retry from there."
 
         /** Enqueue a durable transcription job for a finished recording. */
-        fun enqueue(context: Context, recordingId: String) {
-            val request = request(recordingId)
+        fun enqueue(context: Context, recordingId: String, importedPipeline: Boolean = false) {
+            val request = request(recordingId, importedPipeline)
             WorkManager.getInstance(context).enqueueUniqueWork(
                 "$UNIQUE_PREFIX$recordingId",
                 androidx.work.ExistingWorkPolicy.KEEP,
@@ -354,7 +354,8 @@ class TranscribeWorker(
             )
         }
 
-        internal fun request(recordingId: String) = OneTimeWorkRequestBuilder<TranscribeWorker>()
+        internal fun request(recordingId: String, importedPipeline: Boolean = false) =
+            OneTimeWorkRequestBuilder<TranscribeWorker>()
                 .setInputData(workDataOf(KEY_RECORDING_ID to recordingId))
                 .setConstraints(
                     Constraints.Builder()
@@ -363,6 +364,7 @@ class TranscribeWorker(
                 )
                 // 5s → 30s → ~2m → ~10m-ish ladder (clamped by WorkManager).
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 5, TimeUnit.SECONDS)
+                .apply { if (importedPipeline) addTag(ImportWorker.PIPELINE_TAG) }
                 .build()
     }
 }

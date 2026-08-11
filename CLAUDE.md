@@ -2,7 +2,7 @@
 
 > ## 🟢 CURRENT STATE — see HANDOVER (this block last touched 2026-07-18)
 >
-> Current stable is **v2.1.0** (promoted 2026-07-18). **v2.2.0-nightly.1** (`versionCode = 18`) is the 2026-08-11 Android meeting/share/readability candidate and must remain nightly until S23 Ultra QA passes. The delete/purge round-trips from v2.1.0 also remain runtime-unverified. **[HANDOVER.md](./HANDOVER.md) is the single source of truth** for what ships today, what's queued, and how to resume — read it first; it wins over this file wherever they disagree.
+> Current stable is **v2.1.0** (promoted 2026-07-18). **v2.2.0-nightly.2** (`versionCode = 19`) is the 2026-08-11 Android meeting/share/readability candidate, superseding nightly.1 after its final reliability audit, and must remain nightly until S23 Ultra QA passes. The delete/purge round-trips from v2.1.0 also remain runtime-unverified. **[HANDOVER.md](./HANDOVER.md) is the single source of truth** for what ships today, what's queued, and how to resume — read it first; it wins over this file wherever they disagree.
 >
 > [CODEX_HANDOVER_2026-06-29.md](./CODEX_HANDOVER_2026-06-29.md) is **archived/historical** (the Codex agent is retired; its `v1.2.0-codex.2` preview was superseded by v1.4.0 and the v2.x line). Not required reading.
 >

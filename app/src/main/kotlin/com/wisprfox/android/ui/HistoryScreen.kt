@@ -77,6 +77,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.wisprfox.android.WisprFoxApp
 import com.wisprfox.android.core.AltVersionGenerator
+import com.wisprfox.android.core.ProviderKeyReadiness
 import com.wisprfox.android.history.AltKind
 import com.wisprfox.android.history.Recording
 import com.wisprfox.android.history.RecordingStatus
@@ -359,6 +360,7 @@ private fun HistoryRow(
     var confirmDelete by remember(rec.id) { mutableStateOf(false) }
     var showReader by remember(rec.id) { mutableStateOf(false) }
     var showSpeakers by remember(rec.id) { mutableStateOf(false) }
+    var actionError by remember(rec.id) { mutableStateOf<String?>(null) }
 
     val isError = rec.status == RecordingStatus.ERROR
     val hasLocalAudio = remember(rec.audioPath) { rec.audioPath.isNotBlank() && File(rec.audioPath).isFile }
@@ -475,6 +477,7 @@ private fun HistoryRow(
                         enabled = !generating,
                         onClick = {
                             generating = true
+                            actionError = null
                             scope.launch {
                                 runCatching {
                                     AltVersionGenerator(container).generate(
@@ -485,7 +488,7 @@ private fun HistoryRow(
                                             else -> AltKind.CLEANED
                                         },
                                     )
-                                }
+                                }.onFailure { actionError = it.message ?: "Could not generate ${tab.label}. Check the provider key and try again." }
                                 generating = false
                             }
                         },
@@ -533,13 +536,21 @@ private fun HistoryRow(
                     }
                 }
                 rec.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                actionError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
             }
         }
     }
 
     if (showRerun) {
-        RerunDialog(rec, settings, canTranscribe = !rec.remote && hasLocalAudio, onDismiss = { showRerun = false }) { request ->
+        RerunDialog(
+            rec,
+            settings,
+            providerKeys = container.providerKeys,
+            canTranscribe = !rec.remote && hasLocalAudio,
+            onDismiss = { showRerun = false },
+        ) { request ->
             showRerun = false
+            actionError = null
             scope.launch {
                 if (request.transcribe) {
                     container.recordings.setProcessingOverrides(
@@ -565,9 +576,15 @@ private fun HistoryRow(
                     container.recordings.retry(ctx, rec.id)
                 } else {
                     val generator = AltVersionGenerator(container)
-                    if (request.cleaned) runCatching { generator.generate(rec.id, AltKind.CLEANED, request.llmProvider, request.llmModel) }
-                    if (request.drafted) runCatching { generator.generate(rec.id, AltKind.DRAFTED, request.strongProvider, request.strongModel) }
-                    if (request.meeting) runCatching { generator.generate(rec.id, AltKind.MEETING_NOTES, request.strongProvider, request.strongModel) }
+                    val failures = mutableListOf<String>()
+                    suspend fun generate(kind: AltKind, label: String, provider: String, model: String) {
+                        runCatching { generator.generate(rec.id, kind, provider, model) }
+                            .onFailure { failures += "$label: ${it.message ?: "provider request failed"}" }
+                    }
+                    if (request.cleaned) generate(AltKind.CLEANED, "Clean", request.llmProvider, request.llmModel)
+                    if (request.drafted) generate(AltKind.DRAFTED, "Draft", request.strongProvider, request.strongModel)
+                    if (request.meeting) generate(AltKind.MEETING_NOTES, "Meeting notes", request.strongProvider, request.strongModel)
+                    actionError = failures.takeIf { it.isNotEmpty() }?.joinToString("\n")
                 }
             }
         }
@@ -739,6 +756,7 @@ private data class RerunRequest(
 private fun RerunDialog(
     rec: Recording,
     settings: AppSettings,
+    providerKeys: ProviderKeyReadiness,
     canTranscribe: Boolean,
     onDismiss: () -> Unit,
     onRun: (RerunRequest) -> Unit,
@@ -765,7 +783,18 @@ private fun RerunDialog(
             sttModel = compatible.second
         }
     }
-    val canRun = transcribe || cleaned || drafted || meeting
+    val missingKeys = buildList {
+        if (transcribe) providerKeys.stt(sttProvider).takeUnless { it.ready }?.let {
+            add("${it.providerLabel} key for transcription")
+        }
+        if (cleaned) providerKeys.llm(llmProvider).takeUnless { it.ready }?.let {
+            add("${it.providerLabel} key for Clean")
+        }
+        if (drafted || meeting) providerKeys.llm(strongProvider).takeUnless { it.ready }?.let {
+            add("${it.providerLabel} key for Draft/Meeting")
+        }
+    }.distinct()
+    val canRun = (transcribe || cleaned || drafted || meeting) && missingKeys.isEmpty()
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -843,6 +872,13 @@ private fun RerunDialog(
                         strongModel = ProviderCatalog.defaultStrongLlmModel(it)
                     }
                     RerunModels(ProviderCatalog.llmModelsFor(strongProvider), strongModel) { strongModel = it }
+                }
+                if (missingKeys.isNotEmpty()) {
+                    Text(
+                        "Add ${missingKeys.joinToString()} in AI & model settings before running this recipe.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
                 }
             }
         },

@@ -1,6 +1,6 @@
 # HANDOVER - wispr-fox-android
 
-> Last update: 2026-08-11. Current stable: **v2.1.0** (accounts + cross-device sync, UI redesign/dark theme, ownership-scoped delete + Purge). The next candidate is **v2.2.0-nightly.1** (`versionName = "2.2.0"`, `versionCode = 18`) with the Android meeting/share/readability revamp below. **Do not promote it to stable until S23 Ultra device QA passes.** The older delete/purge PostgREST paths also remain runtime-unverified.
+> Last update: 2026-08-11. Current stable: **v2.1.0** (accounts + cross-device sync, UI redesign/dark theme, ownership-scoped delete + Purge). The current candidate is **v2.2.0-nightly.2** (`versionName = "2.2.0-nightly.2"`, `versionCode = 19`) with the Android meeting/share/readability revamp below. It supersedes nightly.1 after a final reliability audit. **Do not promote it to stable until S23 Ultra device QA passes.** The older delete/purge PostgREST paths also remain runtime-unverified.
 
 This file is the current state-of-the-world for Android. `CLAUDE.md` is useful historical context, but this handover wins when they disagree. The full audit + rationale behind the v1.3.0 batch lives in `docs/AUDIT_2026-07-06_FABLE.md` — read it before touching overlay/delivery/pipeline code. The 2026-07-17 UX/UI audit that drove the v2.1.0 redesign is `docs/AUDIT_2026-07-17_ANDROID.md`.
 
@@ -14,7 +14,17 @@ wispr-fox is three clients sharing one Supabase backend. Keep this block in sync
 
 Shared backend spec: `../wispr-fox-web/docs/SYNC_DESIGN.md` · one-time account/backend setup: `../wispr-fox-web/SETUP_ACCOUNTS.md` (secrets in the gitignored `../wispr-fox-web/SECRETS.local.md`).
 
-## v2.2.0-nightly.1 — Android meeting/share product pass (2026-08-11)
+## v2.2.0-nightly.2 — Android meeting/share product pass (2026-08-11)
+
+- Final release-audit corrections: About carries exact channel/sequence metadata
+  and update comparison understands nightly ordering; one centralized provider
+  credential resolver now powers both client construction and UI preflight;
+  text-only rerun failures are visible rather than swallowed.
+- Shared sources remain included in Storage after worker handoff. Clear audio
+  serializes against queue creation, cancels tagged import decode/STT work before
+  deletion, clears source/merge/WAV bytes, and marks interrupted imports Error.
+- nightly.1 remains an immutable prerelease artifact; nightly.2 is the candidate
+  to install and test.
 
 - Four compact primary tabs: Speak, Upload, History, Usage. Foxy is the single
   Speak control; the duplicate FAB and Home usage/import clutter are gone.
@@ -46,7 +56,8 @@ Shared backend spec: `../wispr-fox-web/docs/SYNC_DESIGN.md` · one-time account/
 - Home-screen widget exposes explicit Speak/Upload actions and does not create
   an always-listening path.
 - Verification: `:app:compileDebugKotlin` green; `:app:testDebugUnitTest` green
-  (86 tests after speaker-turn coverage). Release APK remains CI-only.
+  (92 tests, including release ordering and provider fallback). Release APK
+  remains CI-only.
 - Device QA owed: accessibility setup after OS update; share one/many/merged
   Samsung recordings; long diarized meeting + names/copy/reader; widget start
   and stop; update links; sync schema interoperability; in-place signed update.

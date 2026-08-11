@@ -8,10 +8,11 @@ Website: https://kumaradarsh1993.github.io/wispr-fox-android/
 
 **Download:** the **[Releases page](https://github.com/kumaradarsh1993/wispr-fox-android/releases)** always has the latest APK + notes. Current stable: **v2.1.0** (accounts + cross-device sync, UI redesign + dark theme, ownership-scoped delete + Purge).
 
-Latest preview: **v2.2.0-nightly.1** adds direct Android sharing/upload,
+Latest preview: **v2.2.0-nightly.2** adds direct Android sharing/upload,
 diarized meetings and Meeting Notes, focused reading, compact four-tab
 navigation, independent AI defaults, additional Foxy avatars, and a home-screen
-widget. It remains a nightly pending S23 Ultra device QA.
+widget. nightly.2 also tightens update identity, provider-key preflight, and
+queued-audio clearing. It remains a nightly pending S23 Ultra device QA.
 
 ---
 

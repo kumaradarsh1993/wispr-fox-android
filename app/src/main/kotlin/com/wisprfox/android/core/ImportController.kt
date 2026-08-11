@@ -4,14 +4,19 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.work.WorkManager
 import com.wisprfox.android.history.RecordingRepository
 import com.wisprfox.android.provider.DictationMode
 import com.wisprfox.android.queue.ImportWorker
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -57,6 +62,7 @@ class ImportController(
     private val scope: CoroutineScope,
 ) {
     private val appContext = context.applicationContext
+    private val stagingMutex = Mutex()
     private val _staged = MutableStateFlow(loadStagedQueue())
     val staged: StateFlow<List<StagedAudio>> = _staged.asStateFlow()
 
@@ -64,22 +70,24 @@ class ImportController(
     fun stageSharedUris(uris: List<Uri>) {
         if (uris.isEmpty()) return
         scope.launch {
-            val stagedDir = File(appContext.filesDir, "shared-audio").apply { mkdirs() }
-            val additions = uris.mapNotNull { uri ->
-                runCatching {
-                    val meta = queryMeta(uri)
-                    val id = UUID.randomUUID().toString()
-                    val safeName = meta.first.replace(Regex("[^A-Za-z0-9._ -]"), "_").takeLast(100)
-                    val target = File(stagedDir, "$id-$safeName")
-                    appContext.contentResolver.openInputStream(uri).use { input ->
-                        requireNotNull(input) { "Unable to open shared audio" }
-                        target.outputStream().use(input::copyTo)
-                    }
-                    StagedAudio(id, Uri.fromFile(target), meta.first, meta.second, target.length())
-                }.getOrNull()
+            stagingMutex.withLock {
+                val stagedDir = stagedDir().apply { mkdirs() }
+                val additions = uris.mapNotNull { uri ->
+                    runCatching {
+                        val meta = queryMeta(uri)
+                        val id = UUID.randomUUID().toString()
+                        val safeName = meta.first.replace(Regex("[^A-Za-z0-9._ -]"), "_").takeLast(100)
+                        val target = File(stagedDir, "$id-$safeName")
+                        appContext.contentResolver.openInputStream(uri).use { input ->
+                            requireNotNull(input) { "Unable to open shared audio" }
+                            target.outputStream().use(input::copyTo)
+                        }
+                        StagedAudio(id, Uri.fromFile(target), meta.first, meta.second, target.length())
+                    }.getOrNull()
+                }
+                _staged.value = _staged.value + additions
+                persistStagedQueue()
             }
-            _staged.value = _staged.value + additions
-            persistStagedQueue()
         }
     }
 
@@ -101,18 +109,38 @@ class ImportController(
         val files = _staged.value
         if (files.isEmpty()) return
         scope.launch {
-            importStaged(files, config)
-            _staged.value = emptyList()
-            persistStagedQueue()
+            stagingMutex.withLock {
+                importStaged(files, config)
+                val importedIds = files.mapTo(mutableSetOf(), StagedAudio::id)
+                _staged.value = _staged.value.filterNot { it.id in importedIds }
+                persistStagedQueue()
+            }
         }
     }
 
-    fun stagedStorage(): Pair<Int, Long> = _staged.value.size to _staged.value.sumOf { it.bytes }
+    /** Includes staged audio and handed-off sources awaiting ImportWorker. */
+    fun stagedStorage(): Pair<Int, Long> {
+        val files = stagedDir().listFiles().orEmpty().filter {
+            it.isFile && it.name !in setOf("staged-queue.json", "staged-queue.tmp") &&
+                !it.name.endsWith(".wisprfox-merge.json")
+        }
+        return files.size to files.sumOf(File::length)
+    }
 
-    fun clearStaged() {
-        _staged.value.forEach { it.uri.path?.let { path -> runCatching { File(path).delete() } } }
-        _staged.value = emptyList()
-        persistStagedQueue()
+    /** Cancel decode + STT before deletion so an in-flight import cannot restore audio. */
+    suspend fun cancelQueuedWorkAndClearSources() = withContext(Dispatchers.IO) {
+        stagingMutex.withLock {
+            // Serialize cancellation with processStaged(), which creates the
+            // WorkManager chain while holding this same lock. Otherwise a
+            // just-enqueued chain could slip in after cancelAllWorkByTag().
+            WorkManager.getInstance(appContext).cancelAllWorkByTag(ImportWorker.PIPELINE_TAG).result.get()
+            _staged.value = emptyList()
+            stagedDir().listFiles().orEmpty().forEach { runCatching { it.delete() } }
+            appContext.cacheDir.listFiles().orEmpty()
+                .filter { it.name.startsWith("merge-") && it.name.endsWith(".wav") }
+                .forEach { runCatching { it.delete() } }
+            persistStagedQueue()
+        }
     }
 
     fun import(uris: List<Uri>, config: ImportConfig) {
@@ -230,7 +258,9 @@ class ImportController(
     private fun importDir(): File =
         File(appContext.getExternalFilesDir(null), "audio/import").apply { mkdirs() }
 
-    private val stagedQueueFile: File get() = File(appContext.filesDir, "shared-audio/staged-queue.json")
+    private fun stagedDir(): File = File(appContext.filesDir, "shared-audio")
+
+    private val stagedQueueFile: File get() = File(stagedDir(), "staged-queue.json")
 
     private fun loadStagedQueue(): List<StagedAudio> = runCatching {
         val file = stagedQueueFile

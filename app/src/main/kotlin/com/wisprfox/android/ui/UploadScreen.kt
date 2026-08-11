@@ -42,7 +42,6 @@ import com.wisprfox.android.core.ImportConfig
 import com.wisprfox.android.provider.DictationMode
 import com.wisprfox.android.provider.ProviderCatalog
 import com.wisprfox.android.settings.AppSettings
-import com.wisprfox.android.settings.SecureKeyStore
 import java.text.DateFormat
 import java.util.Date
 
@@ -71,22 +70,15 @@ fun UploadScreen(onOpenSettings: () -> Unit, onSelectTab: (NavTab) -> Unit) {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         container.importController.stageSharedUris(uris)
     }
-    fun sttReady(provider: String): Boolean = when (provider) {
-        ProviderCatalog.STT_OPENAI -> container.secrets.has(SecureKeyStore.Key.OpenAiStt)
-        ProviderCatalog.STT_DEEPGRAM -> container.secrets.has(SecureKeyStore.Key.DeepgramStt)
-        ProviderCatalog.STT_ELEVENLABS -> container.secrets.has(SecureKeyStore.Key.ElevenLabsStt)
-        else -> container.secrets.has(SecureKeyStore.Key.GroqStt)
-    }
-    fun llmReady(provider: String): Boolean = when (provider) {
-        ProviderCatalog.LLM_OPENAI -> container.secrets.has(SecureKeyStore.Key.OpenAiLlm)
-        ProviderCatalog.LLM_GEMINI -> container.secrets.has(SecureKeyStore.Key.GeminiLlm)
-        else -> container.secrets.has(SecureKeyStore.Key.GroqLlm) || container.secrets.has(SecureKeyStore.Key.GroqStt)
-    }
     val missingKeys = buildList {
-        if (!sttReady(config.sttProvider)) add("${ProviderCatalog.label(config.sttProvider)} speech key")
-        if (config.generateCleaned && !llmReady(config.llmProvider)) add("${ProviderCatalog.label(config.llmProvider)} cleanup key")
-        if ((config.generateDraft || config.generateMeetingNotes) && !llmReady(config.strongProvider)) {
-            add("${ProviderCatalog.label(config.strongProvider)} Draft/Meeting key")
+        container.providerKeys.stt(config.sttProvider).takeUnless { it.ready }?.let {
+            add("${it.providerLabel} key for transcription")
+        }
+        if (config.generateCleaned) container.providerKeys.llm(config.llmProvider).takeUnless { it.ready }?.let {
+            add("${it.providerLabel} key for cleanup")
+        }
+        if (config.generateDraft || config.generateMeetingNotes) container.providerKeys.llm(config.strongProvider).takeUnless { it.ready }?.let {
+            add("${it.providerLabel} key for Draft/Meeting")
         }
     }.distinct()
 

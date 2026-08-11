@@ -321,6 +321,7 @@ class RecordingRepository(
 
     /** Delete local audio while retaining transcripts and cloud history. */
     suspend fun clearAllAudio(): AudioStorage {
+        dao.failActiveImportsForAudioClear()
         var files = 0
         var bytes = 0L
         for (row in dao.listAll()) {
