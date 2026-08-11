@@ -9,8 +9,9 @@ import com.wisprfox.android.provider.DictationMode
 /**
  * One row per recording. Denormalised lifecycle tracked via [status]. Schema
  * mirrors the desktop sibling's `recordings` table (`history/mod.rs`) — three
- * text outputs (transcript / cleanedText / draftedText) so a single recording
- * can hold its Raw, Cleaned, and Reformatted versions simultaneously.
+ * text outputs stay distinct. Meeting metadata follows the cross-client schema
+ * contract used by desktop/web; speaker JSON is versioned so it can evolve
+ * without another Room migration.
  */
 @Entity(tableName = "recordings", indices = [Index("created_at")])
 data class RecordingEntity(
@@ -23,6 +24,12 @@ data class RecordingEntity(
     val transcript: String? = null,
     @ColumnInfo(name = "cleaned_text") val cleanedText: String? = null,
     @ColumnInfo(name = "drafted_text") val draftedText: String? = null,
+    val title: String? = null,
+    @ColumnInfo(name = "meeting_notes_text") val meetingNotesText: String? = null,
+    @ColumnInfo(name = "speaker_turns") val speakerTurns: String? = null,
+    @ColumnInfo(name = "speaker_names") val speakerNames: String? = null,
+    @ColumnInfo(name = "is_meeting") val isMeeting: Boolean = false,
+    @ColumnInfo(name = "diarization_enabled") val diarizationEnabled: Boolean = false,
     @ColumnInfo(name = "stt_provider") val sttProvider: String? = null,
     @ColumnInfo(name = "llm_provider") val llmProvider: String? = null,
     @ColumnInfo(name = "target_package") val targetPackage: String? = null,
@@ -42,6 +49,14 @@ data class RecordingEntity(
     @ColumnInfo(name = "llm_model_override") val llmModelOverride: String? = null,
     /** True when this row came from an imported audio file (not the live mic). */
     val imported: Boolean = false,
+    /** Durable import recipe, e.g. "cleaned,drafted,meeting". */
+    @ColumnInfo(name = "requested_outputs") val requestedOutputs: String = "",
+    @ColumnInfo(name = "strong_provider_override") val strongProviderOverride: String? = null,
+    @ColumnInfo(name = "strong_model_override") val strongModelOverride: String? = null,
+    @ColumnInfo(name = "source_name") val sourceName: String? = null,
+    @ColumnInfo(name = "source_modified_at") val sourceModifiedAt: Long? = null,
+    @ColumnInfo(name = "batch_id") val batchId: String? = null,
+    @ColumnInfo(name = "batch_order") val batchOrder: Int = 0,
     /**
      * Sync/accounts (schema v5). `platform` is "mobile" for rows created on
      * this device and "desktop"/"web"/"mobile" for rows pulled from another
@@ -66,7 +81,10 @@ enum class RecordingStatus(val raw: String) {
     /** Decoding an imported audio file into the pipeline's WAV format. */
     IMPORTING("importing"),
     TRANSCRIBING("transcribing"),
+    DIARIZING("diarizing"),
     CLEANING("cleaning"),
+    DRAFTING("drafting"),
+    MEETING_NOTES("meeting_notes"),
     INJECTING("injecting"),
     DONE("done"),
     ERROR("error");
@@ -78,7 +96,7 @@ enum class RecordingStatus(val raw: String) {
 }
 
 /** Which alt-output column an LLM result routes to (cleaned vs drafted). */
-enum class AltKind { CLEANED, DRAFTED }
+enum class AltKind { CLEANED, DRAFTED, MEETING_NOTES }
 
 fun DictationMode.toRaw(): String = when (this) {
     DictationMode.RAW -> "raw"

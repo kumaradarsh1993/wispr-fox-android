@@ -38,7 +38,7 @@ class ElevenLabsSttClient(
         @SerialName("language_code") val languageCode: String? = null,
     )
 
-    override suspend fun transcribe(wavPath: String, hintLang: String?): Transcript =
+    override suspend fun transcribe(wavPath: String, hintLang: String?, diarize: Boolean): Transcript =
         withContext(Dispatchers.IO) {
             val src = File(wavPath)
             if (!src.exists()) throw SttError.Io("file not found: $wavPath")
@@ -50,6 +50,7 @@ class ElevenLabsSttClient(
                 .addFormDataPart("file", src.name, fileBody)
                 .apply {
                     if (hintLang != null) addFormDataPart("language_code", hintLang)
+                    if (diarize) addFormDataPart("diarize", "true")
                 }
                 .build()
 

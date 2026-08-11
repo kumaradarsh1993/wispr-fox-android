@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SyncMetaEntity::class,
         SyncExclusionEntity::class,
     ],
-    version = 5,
+    version = 7,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -32,7 +32,7 @@ abstract class AppDatabase : RoomDatabase() {
                 AppDatabase::class.java,
                 "wisprfox_history.db",
             )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 .build()
                 .also { instance = it }
         }
@@ -117,6 +117,31 @@ abstract class AppDatabase : RoomDatabase() {
                         "`id` TEXT NOT NULL, " +
                         "PRIMARY KEY(`id`))"
                 )
+            }
+        }
+
+        /** Meetings + durable multi-output uploads (v2.2). */
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE recordings ADD COLUMN meeting_notes_text TEXT")
+                db.execSQL("ALTER TABLE recordings ADD COLUMN speaker_turns TEXT")
+                db.execSQL("ALTER TABLE recordings ADD COLUMN speaker_names TEXT")
+                db.execSQL("ALTER TABLE recordings ADD COLUMN is_meeting INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE recordings ADD COLUMN diarization_enabled INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE recordings ADD COLUMN requested_outputs TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE recordings ADD COLUMN strong_provider_override TEXT")
+                db.execSQL("ALTER TABLE recordings ADD COLUMN strong_model_override TEXT")
+                db.execSQL("ALTER TABLE recordings ADD COLUMN source_name TEXT")
+                db.execSQL("ALTER TABLE recordings ADD COLUMN source_modified_at INTEGER")
+                db.execSQL("ALTER TABLE recordings ADD COLUMN batch_id TEXT")
+                db.execSQL("ALTER TABLE recordings ADD COLUMN batch_order INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /** Persist the independent generated title selected in AI & models. */
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE recordings ADD COLUMN title TEXT")
             }
         }
     }

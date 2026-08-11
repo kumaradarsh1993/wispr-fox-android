@@ -29,6 +29,8 @@ data class Transcript(
     val text: String,
     val language: String?,
     val durationSeconds: Double?,
+    /** Versioned JSON SpeakerTurnsDocument when diarization was requested. */
+    val speakerTurnsJson: String? = null,
 )
 
 sealed class SttError(message: String) : Exception(message) {
@@ -48,5 +50,5 @@ interface SttProvider {
      * auto-detects — the user code-switches English ↔ Hindi (locked decision
      * ported from desktop). Throws [SttError] on failure.
      */
-    suspend fun transcribe(wavPath: String, hintLang: String?): Transcript
+    suspend fun transcribe(wavPath: String, hintLang: String?, diarize: Boolean = false): Transcript
 }

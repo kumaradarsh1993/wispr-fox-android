@@ -15,10 +15,10 @@ interface RecordingDao {
     @Query("SELECT * FROM recordings WHERE id = :id")
     suspend fun getById(id: String): RecordingEntity?
 
-    @Query("SELECT * FROM recordings ORDER BY created_at DESC LIMIT :limit")
+    @Query("SELECT * FROM recordings ORDER BY created_at DESC, batch_order ASC LIMIT :limit")
     fun observeRecent(limit: Int): Flow<List<RecordingEntity>>
 
-    @Query("SELECT * FROM recordings ORDER BY created_at DESC LIMIT :limit")
+    @Query("SELECT * FROM recordings ORDER BY created_at DESC, batch_order ASC LIMIT :limit")
     suspend fun listRecent(limit: Int): List<RecordingEntity>
 
     @Query("UPDATE recordings SET status = :status, error = NULL WHERE id = :id")
@@ -33,6 +33,9 @@ interface RecordingDao {
     @Query("UPDATE recordings SET transcript = :transcript, stt_provider = :provider WHERE id = :id")
     suspend fun setTranscript(id: String, transcript: String, provider: String)
 
+    @Query("UPDATE recordings SET title = :title WHERE id = :id")
+    suspend fun setTitle(id: String, title: String)
+
     @Query(
         "UPDATE recordings SET cleaned_text = :text, llm_provider = :provider, " +
             "clippy_used = :used, clippy_note = :note WHERE id = :id"
@@ -44,6 +47,37 @@ interface RecordingDao {
             "clippy_used = :used, clippy_note = :note WHERE id = :id"
     )
     suspend fun setDrafted(id: String, text: String, provider: String?, used: Boolean, note: String?)
+
+    @Query(
+        "UPDATE recordings SET meeting_notes_text = :text, llm_provider = :provider, " +
+            "clippy_used = :used, clippy_note = :note, is_meeting = 1 WHERE id = :id"
+    )
+    suspend fun setMeetingNotes(id: String, text: String, provider: String?, used: Boolean, note: String?)
+
+    @Query("UPDATE recordings SET speaker_turns = :turnsJson, is_meeting = :isMeeting, diarization_enabled = :diarized WHERE id = :id")
+    suspend fun setMeetingMetadata(id: String, turnsJson: String?, isMeeting: Boolean, diarized: Boolean)
+
+    @Query("UPDATE recordings SET speaker_names = :namesJson WHERE id = :id")
+    suspend fun setSpeakerNames(id: String, namesJson: String)
+
+    @Query("UPDATE recordings SET requested_outputs = :outputs WHERE id = :id")
+    suspend fun setRequestedOutputs(id: String, outputs: String)
+
+    @Query("""UPDATE recordings SET stt_provider_override = :sttProvider, stt_model_override = :sttModel,
+        llm_provider_override = :llmProvider, llm_model_override = :llmModel,
+        strong_provider_override = :strongProvider, strong_model_override = :strongModel WHERE id = :id""")
+    suspend fun setProcessingOverrides(
+        id: String,
+        sttProvider: String,
+        sttModel: String,
+        llmProvider: String,
+        llmModel: String,
+        strongProvider: String,
+        strongModel: String,
+    )
+
+    @Query("UPDATE recordings SET audio_path = '' WHERE id = :id")
+    suspend fun clearAudioPath(id: String)
 
     @Query("UPDATE recordings SET retry_count = retry_count + 1 WHERE id = :id")
     suspend fun bumpRetry(id: String)
@@ -81,7 +115,7 @@ interface RecordingDao {
     @Query(
         "UPDATE recordings SET status = 'error', " +
             "error = COALESCE(error, 'Interrupted — app exited before this recording finished. Tap Retry to resume.') " +
-            "WHERE status IN ('recording','transcribing','cleaning','injecting')"
+            "WHERE status IN ('recording','transcribing','diarizing','cleaning','drafting','meeting_notes','injecting')"
     )
     suspend fun recoverStranded(): Int
 

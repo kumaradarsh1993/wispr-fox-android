@@ -30,8 +30,12 @@ object OverlayVisibility {
 
     fun isBusy(pipeline: PipelineState): Boolean =
         pipeline == PipelineState.RECORDING ||
+            pipeline == PipelineState.IMPORTING ||
             pipeline == PipelineState.TRANSCRIBING ||
+            pipeline == PipelineState.DIARIZING ||
             pipeline == PipelineState.CLEANING ||
+            pipeline == PipelineState.DRAFTING ||
+            pipeline == PipelineState.MEETING_NOTES ||
             pipeline == PipelineState.INJECTING
 
     /**

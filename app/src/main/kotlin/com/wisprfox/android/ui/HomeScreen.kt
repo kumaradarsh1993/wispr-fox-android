@@ -13,6 +13,8 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -74,6 +76,7 @@ import com.wisprfox.android.core.AppState
 import com.wisprfox.android.core.ImportConfig
 import com.wisprfox.android.core.PipelineState
 import com.wisprfox.android.history.Recording
+import com.wisprfox.android.history.SpeakerTurnsCodec
 import com.wisprfox.android.overlay.AvatarView
 import com.wisprfox.android.provider.DictationMode
 import com.wisprfox.android.provider.ProviderCatalog
@@ -106,9 +109,15 @@ private const val STT_ACCURATE = "whisper-large-v3"
  * not configured once. Provider/model collapse to a single read-only summary
  * line that deep-links to the Transcription spoke.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun HomeScreen(onOpenHistory: () -> Unit, onOpenSettings: () -> Unit) {
+fun HomeScreen(
+    onOpenHistory: (String?) -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenModels: () -> Unit,
+    onOpenDelivery: () -> Unit,
+    onSelectTab: (NavTab) -> Unit,
+) {
     val ctx = LocalContext.current
     val container = remember { WisprFoxApp.container(ctx) }
     val scope = rememberCoroutineScope()
@@ -178,19 +187,7 @@ fun HomeScreen(onOpenHistory: () -> Unit, onOpenSettings: () -> Unit) {
                 },
             )
         },
-        bottomBar = { WisprBottomBar(NavTab.HOME, onSelect = { if (it == NavTab.HISTORY) onOpenHistory() }) },
-        // The fox is the primary control, but on a 6.8" display it sits well
-        // above the thumb arc. The FAB is the same action at a reachable
-        // position — not a second, competing one.
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { container.controller.toggle(settings.defaultMode) },
-                containerColor = if (recording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                contentColor = if (recording) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onPrimary,
-                icon = { Icon(if (recording) Icons.Filled.Stop else Icons.Filled.Mic, contentDescription = null) },
-                text = { Text(if (recording) "Stop" else "Speak") },
-            )
-        },
+        bottomBar = { WisprBottomBar(NavTab.SPEAK, onSelectTab) },
     ) { inner ->
         ScreenColumn(
             Modifier.padding(inner),
@@ -203,7 +200,7 @@ fun HomeScreen(onOpenHistory: () -> Unit, onOpenSettings: () -> Unit) {
             // three-line accessibility paragraph rendered immediately below it —
             // ~180dp of duplication that pushed the hero below the fold.
             if (missing.isNotEmpty()) {
-                SetupBanner(missing, onClick = onOpenSettings)
+                SetupBanner(missing, onClick = onOpenDelivery)
             }
 
             // Hero. 120dp, not a 160dp avatar inside a 180dp box.
@@ -247,17 +244,10 @@ fun HomeScreen(onOpenHistory: () -> Unit, onOpenSettings: () -> Unit) {
             // Replaces the "Speech-to-text" + "Smart cleanup" cards wholesale —
             // both were settings duplicated onto Home. Read-only summary,
             // deep-links to where they're actually configured.
-            EngineSummaryRow(settings = settings, onClick = onOpenSettings)
-
-            val usage = rememberUsageSnapshot(settings)
-            if (usage != null) {
-                SectionCard { UsageStrip(usage) }
-            }
+            EngineSummaryRow(settings = settings, onClick = onOpenModels)
 
             // Recent gets the room the hero was wasting.
             RecentsCard(recordings = recordings, onOpenAll = onOpenHistory)
-
-            ImportRow(onClick = { showImport = true })
 
             // Clear the FAB + bottom bar.
             Spacer(Modifier.height(Space.xxl))
@@ -375,7 +365,7 @@ private fun SetupBanner(missing: List<String>, onClick: () -> Unit) {
 /* ── Recents preview ─────────────────────────────────────────────────────── */
 
 @Composable
-private fun RecentsCard(recordings: List<Recording>, onOpenAll: () -> Unit) {
+private fun RecentsCard(recordings: List<Recording>, onOpenAll: (String?) -> Unit) {
     Card(
         Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(Radius.lg),
@@ -386,7 +376,7 @@ private fun RecentsCard(recordings: List<Recording>, onOpenAll: () -> Unit) {
                 Modifier
                     .fillMaxWidth()
                     .heightIn(min = Sizes.touch)
-                    .clickable(onClick = onOpenAll)
+                    .clickable { onOpenAll(null) }
                     .padding(horizontal = Space.card),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -406,7 +396,7 @@ private fun RecentsCard(recordings: List<Recording>, onOpenAll: () -> Unit) {
                     modifier = Modifier.padding(horizontal = Space.card, vertical = Space.sm),
                 )
             } else {
-                recordings.forEach { RecentRow(it, onClick = onOpenAll) }
+                recordings.forEach { rec -> RecentRow(rec, onClick = { onOpenAll(rec.id) }) }
             }
         }
     }
@@ -414,18 +404,27 @@ private fun RecentsCard(recordings: List<Recording>, onOpenAll: () -> Unit) {
 
 @Composable
 private fun RecentRow(rec: Recording, onClick: () -> Unit) {
+    val ctx = LocalContext.current
+    val container = remember { WisprFoxApp.container(ctx) }
     Column(
         Modifier
             .fillMaxWidth()
             .heightIn(min = Sizes.touch)
-            .clickable(onClick = onClick)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = {
+                    rec.primaryText()?.takeIf(String::isNotBlank)?.let {
+                        container.delivery.copyToClipboard(SpeakerTurnsCodec.applyNames(it, rec.speakerNames))
+                    }
+                },
+            )
             .padding(horizontal = Space.card, vertical = Space.sm),
         verticalArrangement = Arrangement.spacedBy(Space.xs),
     ) {
         Text(
-            rec.primaryText()?.takeIf { it.isNotBlank() }?.take(80) ?: "(no transcript yet)",
+            rec.primaryText()?.takeIf { it.isNotBlank() } ?: "(no transcript yet)",
             style = MaterialTheme.typography.bodyMedium,
-            maxLines = 1,
+            maxLines = 3,
             overflow = TextOverflow.Ellipsis,
         )
         Text(
@@ -484,8 +483,12 @@ private fun missingPermissions(ctx: Context, a11yConnected: Boolean): List<Strin
 private fun heroTitle(s: AppState.Snapshot): String = when (s.pipeline) {
     PipelineState.IDLE -> "Tap to speak"
     PipelineState.RECORDING -> "Listening…"
+    PipelineState.IMPORTING -> "Preparing audio…"
     PipelineState.TRANSCRIBING -> "Transcribing…"
+    PipelineState.DIARIZING -> "Labeling speakers…"
     PipelineState.CLEANING -> "Polishing…"
+    PipelineState.DRAFTING -> "Drafting…"
+    PipelineState.MEETING_NOTES -> "Making meeting notes…"
     PipelineState.INJECTING -> "Delivering…"
     PipelineState.DONE -> "Done"
     PipelineState.ERROR -> "Something went wrong"

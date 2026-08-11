@@ -31,6 +31,8 @@ import androidx.compose.runtime.setValue
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.wisprfox.android.core.AppState
@@ -41,6 +43,10 @@ import com.wisprfox.android.ui.HistoryScreen
 import com.wisprfox.android.ui.HomeScreen
 import com.wisprfox.android.ui.OnboardingScreen
 import com.wisprfox.android.ui.SettingsScreen
+import com.wisprfox.android.ui.UploadScreen
+import com.wisprfox.android.ui.UsageScreen
+import com.wisprfox.android.ui.NavTab
+import android.net.Uri
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -72,6 +78,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         requestRuntimePermissions()
         pendingDeepLink = intent?.getStringExtra(EXTRA_OPEN)
+        handleShareIntent(intent)
+        handleWidgetIntent(intent)
         handleAuthCallbackIfPresent(intent)
         setContent {
             WisprFoxTheme(choice = rememberThemeChoice()) {
@@ -84,8 +92,8 @@ class MainActivity : ComponentActivity() {
                     // recomposition / config change.
                     val deepLink = pendingDeepLink
                     LaunchedEffect(deepLink) {
-                        if (deepLink == OPEN_HISTORY && hasKey) {
-                            nav.navigate("history") {
+                        if (deepLink in setOf(OPEN_HISTORY, OPEN_UPLOAD) && hasKey) {
+                            nav.navigate(if (deepLink == OPEN_UPLOAD) "upload" else "history") {
                                 popUpTo("home") { saveState = true }
                                 launchSingleTop = true
                                 restoreState = true
@@ -119,18 +127,31 @@ class MainActivity : ComponentActivity() {
                         }
                         composable("home") {
                             HomeScreen(
-                                onOpenHistory = {
-                                    nav.navigate("history") {
+                                onOpenHistory = { expandId ->
+                                    nav.navigate("history${expandId?.let { "?expand=$it" }.orEmpty()}") {
                                         popUpTo("home") { saveState = true }
                                         launchSingleTop = true
                                         restoreState = true
                                     }
                                 },
                                 onOpenSettings = { nav.navigate("settings") },
+                                onOpenModels = { nav.navigate(SettingsSpoke.TRANSCRIPTION.route) },
+                                onOpenDelivery = { nav.navigate(SettingsSpoke.DELIVERY.route) },
+                                onSelectTab = { tab -> navigateTab(nav, tab) },
                             )
                         }
-                        composable("history") {
+                        composable("upload") {
+                            UploadScreen(
+                                onOpenSettings = { nav.navigate(SettingsSpoke.TRANSCRIPTION.route) },
+                                onSelectTab = { tab -> navigateTab(nav, tab) },
+                            )
+                        }
+                        composable(
+                            "history?expand={expand}",
+                            arguments = listOf(navArgument("expand") { type = NavType.StringType; nullable = true }),
+                        ) { entry ->
                             HistoryScreen(
+                                initialExpandId = entry.arguments?.getString("expand"),
                                 onBack = { nav.popBackStack() },
                                 onOpenHome = {
                                     nav.navigate("home") {
@@ -138,8 +159,10 @@ class MainActivity : ComponentActivity() {
                                         launchSingleTop = true
                                     }
                                 },
+                                onSelectTab = { tab -> navigateTab(nav, tab) },
                             )
                         }
+                        composable("usage") { UsageScreen(onSelectTab = { tab -> navigateTab(nav, tab) }) }
                         // Settings is hub-and-spoke (audit P0-3): the hub is a
                         // list of rows with current-value summaries, each opening
                         // a large-title sub-page. One route per spoke.
@@ -195,6 +218,8 @@ class MainActivity : ComponentActivity() {
         // reused rather than getting a fresh onCreate.
         setIntent(intent)
         intent.getStringExtra(EXTRA_OPEN)?.let { pendingDeepLink = it }
+        handleShareIntent(intent)
+        handleWidgetIntent(intent)
         handleAuthCallbackIfPresent(intent)
     }
 
@@ -241,6 +266,49 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @Suppress("DEPRECATION")
+    private fun handleShareIntent(intent: Intent?) {
+        val share = intent ?: return
+        val uris: List<Uri> = when (share.action) {
+            Intent.ACTION_SEND -> listOfNotNull(share.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri)
+            Intent.ACTION_SEND_MULTIPLE -> share.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM).orEmpty()
+            else -> emptyList()
+        }
+        if (uris.isEmpty()) return
+        WisprFoxApp.container(this).importController.stageSharedUris(uris)
+        pendingDeepLink = OPEN_UPLOAD
+        share.action = null
+    }
+
+    private fun handleWidgetIntent(intent: Intent?) {
+        val widgetIntent = intent ?: return
+        when (widgetIntent.getStringExtra(EXTRA_WIDGET_ACTION)) {
+            WIDGET_SPEAK -> lifecycleScope.launch {
+                // Let the activity reach foreground before requesting microphone
+                // service start; this is the Android 14+ user-initiated path.
+                delay(200)
+                WisprFoxApp.container(this@MainActivity).controller.toggle()
+            }
+            WIDGET_UPLOAD -> pendingDeepLink = OPEN_UPLOAD
+            else -> return
+        }
+        widgetIntent.removeExtra(EXTRA_WIDGET_ACTION)
+    }
+
+    private fun navigateTab(nav: androidx.navigation.NavHostController, tab: NavTab) {
+        val route = when (tab) {
+            NavTab.SPEAK -> "home"
+            NavTab.UPLOAD -> "upload"
+            NavTab.HISTORY -> "history"
+            NavTab.USAGE -> "usage"
+        }
+        nav.navigate(route) {
+            popUpTo("home") { saveState = true }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
+
     private fun requestRuntimePermissions() {
         val needed = mutableListOf<String>()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
@@ -266,5 +334,9 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_OPEN = "open"
         /** Value for [EXTRA_OPEN] that lands on the History screen. */
         const val OPEN_HISTORY = "history"
+        const val OPEN_UPLOAD = "upload"
+        const val EXTRA_WIDGET_ACTION = "widget_action"
+        const val WIDGET_SPEAK = "speak"
+        const val WIDGET_UPLOAD = "upload"
     }
 }

@@ -1,6 +1,6 @@
 # HANDOVER - wispr-fox-android
 
-> Last update: 2026-07-18. Current stable: **v2.1.0** (Latest — accounts + cross-device sync, full UI redesign + dark theme, ownership-scoped delete + Purge; `versionName = "2.1.0"`, `versionCode = 17`, tagged on commit `933652f`). Promoted on the user's "bump to stable" signal, rolling up the v2.0.0-nightly.1 (accounts/sync) and v2.1.0-nightly.1/.2 (redesign, delete/purge) cycle. Previous stable: **v1.4.0** (audio-file import); before that v1.1.0 at commit `4cf396b`. ⚠️ The delete/purge PostgREST paths went stable **runtime-unverified** — green on the automated suite + CI build, never exercised against a live backend; a deliberate live round-trip is still owed.
+> Last update: 2026-08-11. Current stable: **v2.1.0** (accounts + cross-device sync, UI redesign/dark theme, ownership-scoped delete + Purge). The next candidate is **v2.2.0-nightly.1** (`versionName = "2.2.0"`, `versionCode = 18`) with the Android meeting/share/readability revamp below. **Do not promote it to stable until S23 Ultra device QA passes.** The older delete/purge PostgREST paths also remain runtime-unverified.
 
 This file is the current state-of-the-world for Android. `CLAUDE.md` is useful historical context, but this handover wins when they disagree. The full audit + rationale behind the v1.3.0 batch lives in `docs/AUDIT_2026-07-06_FABLE.md` — read it before touching overlay/delivery/pipeline code. The 2026-07-17 UX/UI audit that drove the v2.1.0 redesign is `docs/AUDIT_2026-07-17_ANDROID.md`.
 
@@ -14,6 +14,43 @@ wispr-fox is three clients sharing one Supabase backend. Keep this block in sync
 
 Shared backend spec: `../wispr-fox-web/docs/SYNC_DESIGN.md` · one-time account/backend setup: `../wispr-fox-web/SETUP_ACCOUNTS.md` (secrets in the gitignored `../wispr-fox-web/SECRETS.local.md`).
 
+## v2.2.0-nightly.1 — Android meeting/share product pass (2026-08-11)
+
+- Four compact primary tabs: Speak, Upload, History, Usage. Foxy is the single
+  Speak control; the duplicate FAB and Home usage/import clutter are gone.
+- Rich Upload is also the Android `ACTION_SEND`/`ACTION_SEND_MULTIPLE` audio
+  target. Shared grants are copied immediately into app-owned storage. The user
+  sees filenames, dates, size, ordering controls, separate-vs-merge choice, STT,
+  diarization, output checkboxes, and cleanup/strong-model pickers before work
+  starts. The ordered merge worker decodes and joins locally before STT.
+- Meeting contract parity: Room v7 and sync now carry exact shared fields
+  `meeting_notes_text`, versioned `speaker_turns`, `speaker_names`, `is_meeting`,
+  and `diarization_enabled`. Raw/Clean/Draft/Meeting stay distinct. Deepgram
+  utterances normalize into durable turns; speaker names apply dynamically at
+  render/copy time.
+- Processing/status now distinguishes transcribing, speaker labeling, cleaning,
+  drafting, and meeting notes in both the live avatar and History. Meeting rows
+  use a sober tint, readable segmentation, editable speakers, and a full-screen
+  reader. Expansion state is screen-owned/saveable, so LazyColumn recycling no
+  longer collapses long rows.
+- Recent is 3-line, hold-to-copy only, and taps exact-expanded History. History
+  makes Copy primary, keeps Play/Re-run/Delete compact, and uses one ordered
+  rerun dialog.
+- One compact AI/models screen owns independent defaults for transcription,
+  diarization, cleanup, title, and strong Draft/Meeting generation. Current
+  catalog is aligned with desktop. Storage reports real files/bytes and clears
+  audio without clearing text. About checks stable/nightly GitHub releases.
+- Samsung delivery guidance spells out Installed apps → wispr-fox → On → Allow
+  (Android exposes only the parent Accessibility settings deep-link). Existing
+  desktop Explorer Fox and Spark Buddy packs are ported; no downloaded assets.
+- Home-screen widget exposes explicit Speak/Upload actions and does not create
+  an always-listening path.
+- Verification: `:app:compileDebugKotlin` green; `:app:testDebugUnitTest` green
+  (86 tests after speaker-turn coverage). Release APK remains CI-only.
+- Device QA owed: accessibility setup after OS update; share one/many/merged
+  Samsung recordings; long diarized meeting + names/copy/reader; widget start
+  and stop; update links; sync schema interoperability; in-place signed update.
+
 ## What changed in v2.1.0-nightly.1 (UI redesign + three bug fixes) — SHIPPED 2026-07-17
 
 Tag `v2.1.0-nightly.1` (commits `d88588b` redesign, `3dfff9f` bug fixes); `versionName = "2.1.0"`, `versionCode = 16`. Driven by the read-only audit `docs/AUDIT_2026-07-17_ANDROID.md`; user-facing notes in `docs/RELEASE_NOTES_v2.1.0-nightly.1.md`. Still a nightly — no on-device QA yet.
@@ -24,14 +61,6 @@ Tag `v2.1.0-nightly.1` (commits `d88588b` redesign, `3dfff9f` bug fixes); `versi
 - **Home/History decluttered**, onboarding no longer draws under the status bar (edge-to-edge inset handling).
 - **Three bug fixes** (`3dfff9f`): the overlay avatar no longer drifts right when the menu/bubble/label appears (fox-centre X is now the persisted anchor); a failed transcription no longer wedges the pipeline so recording stays locked; and auto-paste stops falsely reporting success — it now verifies the text actually landed before saying "Pasted" (was treating `performAction() == true` as proof).
 - Verified by the automated suite (83 tests) + the build only. **Real-device QA (S23 Ultra) still owed** — including the paste-timing double-paste risk called out in the release notes.
-
-## STILL PENDING on Android — sprite packs + pet animations
-
-The owner's sprite/"the fire" complaint is only partly addressed. Per `docs/AUDIT_2026-07-17_ANDROID.md` P1-3:
-
-- **`codex-fox` and `spark-buddy` raster packs do not exist on Android at all** (confirmed: no `codex*`/`spark*` drawables in `app/src/main/res/drawable-nodpi/`; `settings/Avatar.kt` is still `{ FOX, CLIPPY, ORU_GUJIA, SIRI }`). The web client has all three packs (`codex-fox`, `oru-gujia`, `spark-buddy`) **plus** the terminal pets; Android has only the legacy 5-state watercolour fox + Oru & Gujia.
-- **Raster avatars still get one shared `breathe` scale and a hard PNG cut** — no per-state animation and no crossfade, unlike the Compose-drawn Clippy/Siri avatars. Porting the desktop's data-driven `avatar.json` pack model + an animation layer is the outstanding work (audit P1-3 has the plan).
-- `oru-gujia/sleeping.png` and an idle-timeout to drive a sleeping state are also unported.
 
 ## Delete policy — migrated to ownership-scoped + Purge (2026-07-17)
 

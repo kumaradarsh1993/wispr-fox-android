@@ -4,14 +4,18 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -30,12 +34,15 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -49,6 +56,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -56,23 +66,29 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.wisprfox.android.WisprFoxApp
 import com.wisprfox.android.core.AltVersionGenerator
 import com.wisprfox.android.history.AltKind
 import com.wisprfox.android.history.Recording
 import com.wisprfox.android.history.RecordingStatus
+import com.wisprfox.android.history.SpeakerTurnsCodec
 import com.wisprfox.android.provider.DictationMode
+import com.wisprfox.android.provider.ProviderCatalog
+import com.wisprfox.android.settings.AppSettings
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import java.io.File
 import kotlinx.coroutines.launch
 
 /**
@@ -95,7 +111,12 @@ import kotlinx.coroutines.launch
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun HistoryScreen(onBack: () -> Unit, onOpenHome: () -> Unit) {
+fun HistoryScreen(
+    initialExpandId: String? = null,
+    onBack: () -> Unit,
+    onOpenHome: () -> Unit,
+    onSelectTab: (NavTab) -> Unit,
+) {
     val ctx = LocalContext.current
     val container = remember { WisprFoxApp.container(ctx) }
     val scope = rememberCoroutineScope()
@@ -111,6 +132,10 @@ fun HistoryScreen(onBack: () -> Unit, onOpenHome: () -> Unit) {
     var menuOpen by remember { mutableStateOf(false) }
     var confirmDeleteAll by remember { mutableStateOf(false) }
     var confirmDeleteSelected by remember { mutableStateOf(false) }
+    var expandedIds by rememberSaveable { mutableStateOf(emptySet<String>()) }
+    LaunchedEffect(initialExpandId) {
+        initialExpandId?.let { expandedIds = expandedIds + it }
+    }
 
     fun exitSelectMode() {
         selectMode = false
@@ -192,7 +217,7 @@ fun HistoryScreen(onBack: () -> Unit, onOpenHome: () -> Unit) {
                 },
             )
         },
-        bottomBar = { WisprBottomBar(NavTab.HISTORY, onSelect = { if (it == NavTab.HOME) onOpenHome() }) },
+        bottomBar = { WisprBottomBar(NavTab.HISTORY, onSelectTab) },
     ) { inner ->
         Column(Modifier.fillMaxSize().padding(inner)) {
             if (searchOpen && !selectMode) {
@@ -239,6 +264,10 @@ fun HistoryScreen(onBack: () -> Unit, onOpenHome: () -> Unit) {
                                 selectMode = selectMode,
                                 checked = selected[rec.id] == true,
                                 onToggleSelect = { selected[rec.id] = !(selected[rec.id] ?: false) },
+                                expanded = rec.id in expandedIds,
+                                onToggleExpanded = {
+                                    expandedIds = if (rec.id in expandedIds) expandedIds - rec.id else expandedIds + rec.id
+                                },
                             )
                         }
                     }
@@ -317,20 +346,28 @@ private fun HistoryRow(
     selectMode: Boolean,
     checked: Boolean,
     onToggleSelect: () -> Unit,
+    expanded: Boolean,
+    onToggleExpanded: () -> Unit,
 ) {
     val ctx = LocalContext.current
     val container = remember { WisprFoxApp.container(ctx) }
     val scope = rememberCoroutineScope()
 
-    var expanded by remember(rec.id) { mutableStateOf(false) }
     var tab by remember(rec.id) { mutableStateOf(defaultTabFor(rec.mode)) }
     var generating by remember(rec.id) { mutableStateOf(false) }
-    var confirmRetry by remember(rec.id) { mutableStateOf(false) }
+    var showRerun by remember(rec.id) { mutableStateOf(false) }
     var confirmDelete by remember(rec.id) { mutableStateOf(false) }
+    var showReader by remember(rec.id) { mutableStateOf(false) }
+    var showSpeakers by remember(rec.id) { mutableStateOf(false) }
 
     val isError = rec.status == RecordingStatus.ERROR
-    val rowBg = if (isError) MaterialTheme.colorScheme.errorContainer
-    else MaterialTheme.colorScheme.surface
+    val hasLocalAudio = remember(rec.audioPath) { rec.audioPath.isNotBlank() && File(rec.audioPath).isFile }
+    val settings by container.settingsStore.settings.collectAsState(initial = AppSettings())
+    val rowBg = when {
+        isError -> MaterialTheme.colorScheme.errorContainer
+        rec.isMeeting -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.42f)
+        else -> MaterialTheme.colorScheme.surface
+    }
 
     Card(
         Modifier.fillMaxWidth(),
@@ -347,7 +384,7 @@ private fun HistoryRow(
                         // delete, so they're not selectable and have no long-press
                         // delete — the affordance is hidden, not just disabled.
                         onClick = {
-                            if (selectMode) { if (!rec.remote) onToggleSelect() } else expanded = !expanded
+                            if (selectMode) { if (!rec.remote) onToggleSelect() } else onToggleExpanded()
                         },
                         // Long-press = press-and-hold delete for an owned row
                         // (SYNC_DESIGN.md), the confirm dialog being the gate.
@@ -376,14 +413,13 @@ private fun HistoryRow(
                     )
                     MetaLine(rec, isError)
                 }
-                // Rows synced from another device have no local audio — hide play.
-                if (!selectMode && !rec.remote) {
-                    val playing = player.playingPath == rec.audioPath
-                    IconButton(onClick = { player.toggle(rec.audioPath) }) {
-                        Icon(
-                            if (playing) Icons.Filled.Stop else Icons.Filled.PlayArrow,
-                            contentDescription = if (playing) "Stop" else "Play",
-                        )
+                // Copy is the primary recovery action; playback moves into the
+                // compact expanded action row.
+                if (!selectMode) {
+                    IconButton(onClick = {
+                        rec.primaryText()?.let { container.delivery.copyToClipboard(SpeakerTurnsCodec.applyNames(it, rec.speakerNames)) }
+                    }) {
+                        Icon(Icons.Filled.ContentCopy, contentDescription = "Copy")
                     }
                 }
             }
@@ -397,20 +433,34 @@ private fun HistoryRow(
                     TabChip("Raw", tab == Tab.RAW) { tab = Tab.RAW }
                     TabChip("Clean", tab == Tab.CLEANED) { tab = Tab.CLEANED }
                     TabChip("Draft", tab == Tab.REFORMATTED) { tab = Tab.REFORMATTED }
+                    if (rec.isMeeting || rec.meetingNotesText != null) {
+                        TabChip("Meeting", tab == Tab.MEETING) { tab = Tab.MEETING }
+                    }
                 }
 
                 val text = when (tab) {
-                    Tab.RAW -> rec.transcript
+                    Tab.RAW -> SpeakerTurnsCodec.render(rec.speakerTurns, rec.speakerNames).ifBlank { rec.transcript.orEmpty() }
                     Tab.CLEANED -> rec.cleanedText
                     Tab.REFORMATTED -> rec.draftedText
-                }
+                    Tab.MEETING -> rec.meetingNotesText
+                }?.let { SpeakerTurnsCodec.applyNames(it, rec.speakerNames) }
 
                 if (text != null && text.isNotBlank()) {
-                    Text(text, style = MaterialTheme.typography.bodyMedium)
+                    ReadableText(text, meeting = tab == Tab.MEETING)
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
                     TextButton(onClick = { container.delivery.copyToClipboard(text) }) {
                         Icon(Icons.Filled.ContentCopy, contentDescription = null)
                         Spacer(Modifier.size(Space.xs))
                         Text("Copy")
+                    }
+                    TextButton(onClick = { showReader = true }) {
+                        Icon(Icons.Filled.Fullscreen, contentDescription = null)
+                        Text(" Read")
+                    }
+                    if (rec.isMeeting) TextButton(onClick = { showSpeakers = true }) {
+                        Icon(Icons.Filled.People, contentDescription = null)
+                        Text(" Speakers")
+                    }
                     }
                 } else if (tab == Tab.RAW) {
                     Text(
@@ -429,7 +479,11 @@ private fun HistoryRow(
                                 runCatching {
                                     AltVersionGenerator(container).generate(
                                         rec.id,
-                                        if (tab == Tab.REFORMATTED) AltKind.DRAFTED else AltKind.CLEANED,
+                                        when (tab) {
+                                            Tab.REFORMATTED -> AltKind.DRAFTED
+                                            Tab.MEETING -> AltKind.MEETING_NOTES
+                                            else -> AltKind.CLEANED
+                                        },
                                     )
                                 }
                                 generating = false
@@ -442,18 +496,22 @@ private fun HistoryRow(
                     // Retry/Re-run re-transcribes from the local WAV — a remote
                     // row (synced from another device) has no local audio, so
                     // it's hidden there; only Delete remains.
-                    if (!rec.remote) {
+                    if (!rec.remote && hasLocalAudio) {
+                        val playing = player.playingPath == rec.audioPath
+                        AssistChip(
+                            onClick = { player.toggle(rec.audioPath) },
+                            label = { Text(if (playing) "Stop" else "Play") },
+                            leadingIcon = { Icon(if (playing) Icons.Filled.Stop else Icons.Filled.PlayArrow, null) },
+                        )
+                    }
+                    if (hasLocalAudio || !rec.transcript.isNullOrBlank()) {
                         AssistChip(
                             onClick = {
                                 // Same pattern as desktop's retry(): if the row's
                                 // not an error, confirm before nuking existing
                                 // text. If it IS an error, fire immediately —
                                 // that's the whole point of retry.
-                                if (isError) {
-                                    scope.launch { container.recordings.retry(ctx, rec.id) }
-                                } else {
-                                    confirmRetry = true
-                                }
+                                showRerun = true
                             },
                             label = { Text(if (isError) "Retry" else "Re-run") },
                             leadingIcon = { Icon(Icons.Filled.Refresh, contentDescription = null) },
@@ -479,17 +537,40 @@ private fun HistoryRow(
         }
     }
 
-    if (confirmRetry) {
-        ConfirmDialog(
-            title = "Re-run this recording?",
-            body = "Re-running will replace the current transcript (and any cleaned/drafted versions). The audio stays.",
-            confirm = "Re-run",
-            onDismiss = { confirmRetry = false },
-            onConfirm = {
-                confirmRetry = false
-                scope.launch { container.recordings.retry(ctx, rec.id) }
-            },
-        )
+    if (showRerun) {
+        RerunDialog(rec, settings, canTranscribe = !rec.remote && hasLocalAudio, onDismiss = { showRerun = false }) { request ->
+            showRerun = false
+            scope.launch {
+                if (request.transcribe) {
+                    container.recordings.setProcessingOverrides(
+                        rec.id,
+                        request.sttProvider,
+                        request.sttModel,
+                        request.llmProvider,
+                        request.llmModel,
+                        request.strongProvider,
+                        request.strongModel,
+                    )
+                    container.recordings.setRequestedOutputs(rec.id, buildList {
+                        if (request.cleaned) add("cleaned")
+                        if (request.drafted) add("drafted")
+                        if (request.meeting) add("meeting")
+                    }.joinToString(","))
+                    container.recordings.setMeetingMetadata(
+                        rec.id,
+                        if (request.diarize) rec.speakerTurns else null,
+                        request.diarize || request.meeting,
+                        request.diarize,
+                    )
+                    container.recordings.retry(ctx, rec.id)
+                } else {
+                    val generator = AltVersionGenerator(container)
+                    if (request.cleaned) runCatching { generator.generate(rec.id, AltKind.CLEANED, request.llmProvider, request.llmModel) }
+                    if (request.drafted) runCatching { generator.generate(rec.id, AltKind.DRAFTED, request.strongProvider, request.strongModel) }
+                    if (request.meeting) runCatching { generator.generate(rec.id, AltKind.MEETING_NOTES, request.strongProvider, request.strongModel) }
+                }
+            }
+        }
     }
     if (confirmDelete) {
         DeleteDialog(
@@ -500,6 +581,21 @@ private fun HistoryRow(
                 scope.launch { container.recordings.deleteOwned(listOf(rec.id)) }
             },
         )
+    }
+    if (showReader) {
+        val readerText = when (tab) {
+            Tab.RAW -> SpeakerTurnsCodec.render(rec.speakerTurns, rec.speakerNames).ifBlank { rec.transcript.orEmpty() }
+            Tab.CLEANED -> rec.cleanedText.orEmpty()
+            Tab.REFORMATTED -> rec.draftedText.orEmpty()
+            Tab.MEETING -> rec.meetingNotesText.orEmpty()
+        }.let { SpeakerTurnsCodec.applyNames(it, rec.speakerNames) }
+        FocusReader(rec, tab.label, readerText, onClose = { showReader = false }, onSpeakers = { showSpeakers = true })
+    }
+    if (showSpeakers) {
+        SpeakerNamesDialog(rec, onDismiss = { showSpeakers = false }) { names ->
+            scope.launch { container.recordings.setSpeakerNames(rec.id, SpeakerTurnsCodec.encodeNames(names)) }
+            showSpeakers = false
+        }
     }
 }
 
@@ -528,6 +624,297 @@ private fun MetaLine(rec: Recording, isError: Boolean) {
 }
 
 @Composable
+private fun ReadableText(text: String, meeting: Boolean) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.md)) {
+        readingSegments(text).forEach { paragraph ->
+            Text(
+                paragraph.trim(),
+                style = if (meeting && paragraph.startsWith("#")) MaterialTheme.typography.titleMedium
+                else MaterialTheme.typography.bodyLarge,
+                lineHeight = MaterialTheme.typography.bodyLarge.lineHeight * 1.15,
+            )
+        }
+    }
+}
+
+/** Break unformatted cleanup blobs into eye-sized paragraphs without rewriting words. */
+private fun readingSegments(text: String): List<String> {
+    val explicit = text.trim().split(Regex("\\n\\s*\\n")).filter(String::isNotBlank)
+    if (explicit.size > 1 || text.length < 420) return explicit
+    val sentences = text.trim().split(Regex("(?<=[.!?])\\s+(?=[A-Z0-9])")).filter(String::isNotBlank)
+    if (sentences.size < 3) return explicit
+    val result = mutableListOf<String>()
+    var paragraph = StringBuilder()
+    sentences.forEach { sentence ->
+        if (paragraph.isNotEmpty() && paragraph.length + sentence.length > 300) {
+            result += paragraph.toString()
+            paragraph = StringBuilder()
+        }
+        if (paragraph.isNotEmpty()) paragraph.append(' ')
+        paragraph.append(sentence)
+    }
+    if (paragraph.isNotEmpty()) result += paragraph.toString()
+    return result
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FocusReader(
+    rec: Recording,
+    label: String,
+    text: String,
+    onClose: () -> Unit,
+    onSpeakers: () -> Unit,
+) {
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = { Text(label) },
+                        navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "Close") } },
+                        actions = {
+                            if (rec.isMeeting) IconButton(onClick = onSpeakers) { Icon(Icons.Filled.People, "Name speakers") }
+                        },
+                    )
+                },
+            ) { inner ->
+                Column(
+                    Modifier.fillMaxSize().padding(inner).verticalScroll(androidx.compose.foundation.rememberScrollState())
+                        .padding(horizontal = Space.xl, vertical = Space.lg),
+                    verticalArrangement = Arrangement.spacedBy(Space.lg),
+                ) {
+                    Text(rec.title ?: rec.sourceName ?: "Recording", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                    ReadableText(text, meeting = label == "Meeting Notes")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SpeakerNamesDialog(rec: Recording, onDismiss: () -> Unit, onSave: (Map<String, String>) -> Unit) {
+    val speakers = SpeakerTurnsCodec.decode(rec.speakerTurns).map { it.speaker }.distinct()
+    val existing = SpeakerTurnsCodec.names(rec.speakerNames)
+    var values by remember(rec.id, rec.speakerNames) { mutableStateOf(speakers.associateWith { existing[it].orEmpty() }) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Name speakers") },
+        text = {
+            Column(Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()), verticalArrangement = Arrangement.spacedBy(Space.sm)) {
+                if (speakers.isEmpty()) Text("No speaker turns were returned for this recording.")
+                speakers.forEach { speaker ->
+                    OutlinedTextField(
+                        value = values[speaker].orEmpty(),
+                        onValueChange = { values = values + (speaker to it) },
+                        label = { Text(speaker) },
+                        placeholder = { Text("Real name") },
+                        singleLine = true,
+                    )
+                }
+            }
+        },
+        confirmButton = { Button(onClick = { onSave(values.filterValues(String::isNotBlank)) }, enabled = speakers.isNotEmpty()) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+private data class RerunRequest(
+    val transcribe: Boolean,
+    val diarize: Boolean,
+    val cleaned: Boolean,
+    val drafted: Boolean,
+    val meeting: Boolean,
+    val sttProvider: String,
+    val sttModel: String,
+    val llmProvider: String,
+    val llmModel: String,
+    val strongProvider: String,
+    val strongModel: String,
+)
+
+/** One dependency-ordered recipe instead of four unrelated retry actions. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun RerunDialog(
+    rec: Recording,
+    settings: AppSettings,
+    canTranscribe: Boolean,
+    onDismiss: () -> Unit,
+    onRun: (RerunRequest) -> Unit,
+) {
+    val existing = remember(rec.requestedOutputs) {
+        rec.requestedOutputs.split(',').map(String::trim).filter(String::isNotEmpty).toSet()
+    }
+    val mustTranscribe = rec.transcript.isNullOrBlank()
+    var transcribe by remember(rec.id, canTranscribe) { mutableStateOf(canTranscribe) }
+    var diarize by remember(rec.id, canTranscribe) { mutableStateOf(rec.diarizationEnabled && canTranscribe) }
+    var cleaned by remember(rec.id) { mutableStateOf(rec.cleanedText != null || "cleaned" in existing) }
+    var drafted by remember(rec.id) { mutableStateOf(rec.draftedText != null || "drafted" in existing) }
+    var meeting by remember(rec.id) { mutableStateOf(rec.meetingNotesText != null || "meeting" in existing) }
+    var sttProvider by remember(rec.id) { mutableStateOf(rec.sttProviderOverride ?: settings.sttProvider) }
+    var sttModel by remember(rec.id) { mutableStateOf(rec.sttModelOverride ?: settings.sttModel) }
+    var llmProvider by remember(rec.id) { mutableStateOf(rec.llmProviderOverride ?: settings.llmProvider) }
+    var llmModel by remember(rec.id) { mutableStateOf(rec.llmModelOverride ?: settings.activeLlmModel) }
+    var strongProvider by remember(rec.id) { mutableStateOf(rec.strongProviderOverride ?: settings.strongProvider) }
+    var strongModel by remember(rec.id) { mutableStateOf(rec.strongModelOverride ?: settings.strongModel) }
+    LaunchedEffect(rec.id) {
+        if (diarize) {
+            val compatible = ProviderCatalog.compatibleDiarizationSelection(sttProvider, sttModel)
+            sttProvider = compatible.first
+            sttModel = compatible.second
+        }
+    }
+    val canRun = transcribe || cleaned || drafted || meeting
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (rec.status == RecordingStatus.ERROR) "Retry recording" else "Re-run recording") },
+        text = {
+            Column(
+                Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(Space.sm),
+            ) {
+                Text("1 · Speech", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                RerunChoice(
+                    "Transcription",
+                    "${ProviderCatalog.label(sttProvider)} · ${ProviderCatalog.shortModel(sttModel)}",
+                    transcribe,
+                    enabled = canTranscribe && !mustTranscribe,
+                ) { transcribe = it; if (!it) diarize = false }
+                RerunChoice(
+                    "Label speakers",
+                    "Uses the diarization default and marks this as a meeting",
+                    diarize,
+                    enabled = transcribe,
+                ) { enabled ->
+                    diarize = enabled
+                    if (enabled) {
+                        val compatible = ProviderCatalog.compatibleDiarizationSelection(sttProvider, sttModel)
+                        sttProvider = compatible.first
+                        sttModel = compatible.second
+                    }
+                }
+                if (transcribe) {
+                    RerunProviderPicker(
+                        if (diarize) ProviderCatalog.sttProviders.filter { it.id == ProviderCatalog.STT_DEEPGRAM }
+                        else ProviderCatalog.sttProviders,
+                        sttProvider,
+                    ) { provider ->
+                        sttProvider = provider
+                        sttModel = ProviderCatalog.defaultSttModel(provider)
+                    }
+                    RerunModels(ProviderCatalog.sttModelsFor(sttProvider), sttModel) { sttModel = it }
+                }
+
+                Text("2 · AI outputs", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                Text(
+                    "Selected outputs run after speech, in this order. Existing transcript can be reused when Transcription is off.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                RerunChoice(
+                    "Clean",
+                    "${ProviderCatalog.label(llmProvider)} · ${ProviderCatalog.shortModel(llmModel)}",
+                    cleaned,
+                ) { cleaned = it }
+                RerunChoice(
+                    "Draft",
+                    "${ProviderCatalog.label(strongProvider)} · ${ProviderCatalog.shortModel(strongModel)}",
+                    drafted,
+                ) { drafted = it }
+                RerunChoice(
+                    "Meeting notes",
+                    "${ProviderCatalog.label(strongProvider)} · ${ProviderCatalog.shortModel(strongModel)}",
+                    meeting,
+                ) { meeting = it }
+                if (cleaned) {
+                    Text("Clean model", style = MaterialTheme.typography.labelMedium)
+                    RerunProviderPicker(ProviderCatalog.llmProviders, llmProvider) {
+                        llmProvider = it
+                        llmModel = ProviderCatalog.defaultLlmModel(it)
+                    }
+                    RerunModels(ProviderCatalog.llmModelsFor(llmProvider), llmModel) { llmModel = it }
+                }
+                if (drafted || meeting) {
+                    Text("Draft & Meeting model", style = MaterialTheme.typography.labelMedium)
+                    RerunProviderPicker(ProviderCatalog.llmProviders, strongProvider) {
+                        strongProvider = it
+                        strongModel = ProviderCatalog.defaultStrongLlmModel(it)
+                    }
+                    RerunModels(ProviderCatalog.llmModelsFor(strongProvider), strongModel) { strongModel = it }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = canRun,
+                onClick = {
+                    onRun(RerunRequest(
+                        transcribe, diarize && transcribe, cleaned, drafted, meeting,
+                        sttProvider, sttModel, llmProvider, llmModel, strongProvider, strongModel,
+                    ))
+                },
+            ) { Text(if (rec.status == RecordingStatus.ERROR) "Retry" else "Run") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun RerunProviderPicker(
+    options: List<ProviderCatalog.ProviderOption>,
+    selected: String,
+    onSelect: (String) -> Unit,
+) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
+        options.forEach { option ->
+            FilterChip(selected = option.id == selected, onClick = { onSelect(option.id) }, label = { Text(option.label) })
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun RerunModels(
+    options: List<ProviderCatalog.ModelOption>,
+    selected: String,
+    onSelect: (String) -> Unit,
+) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
+        options.forEach { option ->
+            FilterChip(selected = option.id == selected, onClick = { onSelect(option.id) }, label = { Text(option.label) })
+        }
+    }
+}
+
+@Composable
+private fun RerunChoice(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    enabled: Boolean = true,
+    onChecked: (Boolean) -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().clickable(enabled = enabled) { onChecked(!checked) },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.sm),
+    ) {
+        Checkbox(checked = checked, onCheckedChange = onChecked, enabled = enabled)
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
 private fun ConfirmDialog(
     title: String,
     body: String,
@@ -549,7 +936,7 @@ private fun TabChip(label: String, selected: Boolean, onClick: () -> Unit) {
     FilterChip(selected = selected, onClick = onClick, label = { Text(label) })
 }
 
-private enum class Tab(val label: String) { RAW("Raw"), CLEANED("Clean"), REFORMATTED("Draft") }
+private enum class Tab(val label: String) { RAW("Raw"), CLEANED("Clean"), REFORMATTED("Draft"), MEETING("Meeting Notes") }
 
 private fun defaultTabFor(mode: DictationMode): Tab = when (mode) {
     DictationMode.RAW -> Tab.RAW
@@ -561,7 +948,10 @@ private fun statusLabel(s: RecordingStatus): String = when (s) {
     RecordingStatus.RECORDING -> "recording"
     RecordingStatus.IMPORTING -> "importing"
     RecordingStatus.TRANSCRIBING -> "transcribing"
+    RecordingStatus.DIARIZING -> "labeling speakers"
     RecordingStatus.CLEANING -> "polishing"
+    RecordingStatus.DRAFTING -> "drafting"
+    RecordingStatus.MEETING_NOTES -> "meeting notes"
     RecordingStatus.INJECTING -> "delivering"
     RecordingStatus.DONE -> "done"
     RecordingStatus.ERROR -> "error"

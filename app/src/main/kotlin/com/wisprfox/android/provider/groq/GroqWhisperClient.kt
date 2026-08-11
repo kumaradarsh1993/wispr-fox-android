@@ -50,7 +50,7 @@ class GroqWhisperClient(
         val duration: Double? = null,
     )
 
-    override suspend fun transcribe(wavPath: String, hintLang: String?): Transcript =
+    override suspend fun transcribe(wavPath: String, hintLang: String?, diarize: Boolean): Transcript =
         withContext(Dispatchers.IO) {
             val src = File(wavPath)
             if (!src.exists()) throw SttError.Io("file not found: $wavPath")

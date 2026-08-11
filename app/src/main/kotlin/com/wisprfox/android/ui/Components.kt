@@ -6,6 +6,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -397,6 +399,8 @@ fun HoldToConfirmButton(
 /** Display name per skin — also the TalkBack label (audit P1-9). */
 fun avatarLabel(avatar: Avatar): String = when (avatar) {
     Avatar.FOX -> "Fox"
+    Avatar.CODEX_FOX -> "Explorer"
+    Avatar.SPARK_BUDDY -> "Spark"
     Avatar.CLIPPY -> "Clippy"
     Avatar.ORU_GUJIA -> "Oru & Gujia"
     Avatar.SIRI -> "Orb"
@@ -423,6 +427,7 @@ fun AvatarPicker(
     Row(
         modifier
             .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
             .selectableGroup(),
         horizontalArrangement = Arrangement.spacedBy(Space.sm),
     ) {
@@ -431,7 +436,7 @@ fun AvatarPicker(
                 avatar = avatar,
                 selected = selected == avatar,
                 onSelect = { onSelect(avatar) },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.width(88.dp),
             )
         }
     }
@@ -484,9 +489,10 @@ private fun AvatarCell(
  */
 @Composable
 fun AvatarPreview(avatar: Avatar, modifier: Modifier = Modifier) {
-    if (avatar == Avatar.ORU_GUJIA) {
-        Image(painterResource(R.drawable.oru_gujia_thumbnail), contentDescription = null, modifier = modifier)
-    } else {
-        AvatarView(avatar, PipelineState.IDLE, modifier)
+    when (avatar) {
+        Avatar.ORU_GUJIA -> Image(painterResource(R.drawable.oru_gujia_thumbnail), contentDescription = null, modifier = modifier)
+        Avatar.CODEX_FOX -> Image(painterResource(R.drawable.codex_fox_thumbnail), contentDescription = null, modifier = modifier)
+        Avatar.SPARK_BUDDY -> Image(painterResource(R.drawable.spark_buddy_thumbnail), contentDescription = null, modifier = modifier)
+        else -> AvatarView(avatar, PipelineState.IDLE, modifier)
     }
 }

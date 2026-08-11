@@ -100,7 +100,7 @@ class SyncEngine(
             val deviceId = settingsStore.deviceId()
             val nowIso = SyncTime.nowIso()
             val idList = ids.joinToString(",")
-            val body = """{"deleted_at":"$nowIso","transcript":null,"cleaned_text":null,"drafted_text":null,"title":null,"updated_at":"$nowIso"}"""
+            val body = """{"deleted_at":"$nowIso","transcript":null,"cleaned_text":null,"drafted_text":null,"meeting_notes_text":null,"speaker_turns":null,"speaker_names":null,"title":null,"updated_at":"$nowIso"}"""
                 .toRequestBody(JSON_MEDIA)
             val request = Request.Builder()
                 .url("${SupabaseConfig.SUPABASE_URL}/rest/v1/notes?id=in.($idList)&device_id=eq.$deviceId")
@@ -254,10 +254,15 @@ class SyncEngine(
                 device_id = deviceId,
                 platform = "mobile",
                 origin = if (row.imported) "upload" else "mic",
-                title = (row.draftedText ?: row.cleanedText ?: row.transcript)?.take(80),
+                title = row.title ?: (row.meetingNotesText ?: row.draftedText ?: row.cleanedText ?: row.transcript)?.take(80),
                 transcript = row.transcript,
                 cleaned_text = row.cleanedText,
                 drafted_text = row.draftedText,
+                meeting_notes_text = row.meetingNotesText,
+                speaker_turns = row.speakerTurns,
+                speaker_names = row.speakerNames,
+                is_meeting = row.isMeeting,
+                diarization_enabled = row.diarizationEnabled,
                 duration_ms = row.durationMs,
                 stt_provider = row.sttProvider,
                 llm_provider = row.llmProvider,
@@ -308,6 +313,11 @@ class SyncEngine(
                     transcript = row.transcript,
                     cleanedText = row.cleaned_text,
                     draftedText = row.drafted_text,
+                    meetingNotesText = row.meeting_notes_text,
+                    speakerTurns = row.speaker_turns,
+                    speakerNames = row.speaker_names,
+                    isMeeting = row.is_meeting,
+                    diarizationEnabled = row.diarization_enabled,
                     durationMs = row.duration_ms,
                     sttProvider = row.stt_provider,
                     llmProvider = row.llm_provider,

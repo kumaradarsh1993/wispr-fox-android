@@ -28,6 +28,15 @@ data class AppSettings(
     val groqLlmModel: String = ProviderCatalog.defaultLlmModel(ProviderCatalog.LLM_GROQ),
     val openAiLlmModel: String = ProviderCatalog.defaultLlmModel(ProviderCatalog.LLM_OPENAI),
     val geminiModel: String = ProviderCatalog.defaultLlmModel(ProviderCatalog.LLM_GEMINI),
+    /** Dedicated diarization default; ordinary dictation keeps [sttProvider]. */
+    val diarizationProvider: String = ProviderCatalog.STT_DEEPGRAM,
+    val diarizationModel: String = "nova-3",
+    /** Cheap, independent title model. Titles no longer consume cleanup defaults. */
+    val titleProvider: String = ProviderCatalog.LLM_GROQ,
+    val titleModel: String = ProviderCatalog.defaultLlmModel(ProviderCatalog.LLM_GROQ),
+    /** Stronger model reserved for Draft and Meeting Notes. */
+    val strongProvider: String = ProviderCatalog.LLM_GROQ,
+    val strongModel: String = ProviderCatalog.defaultStrongLlmModel(ProviderCatalog.LLM_GROQ),
     /** What a single tap on the avatar does. Long-press always offers all three. */
     val defaultMode: DictationMode = DictationMode.CLEANED,
     val retentionDays: Int = 7,
@@ -73,6 +82,12 @@ class SettingsStore(private val context: Context) {
         val groqLlmModel = stringPreferencesKey("groq_llm_model")
         val openAiLlmModel = stringPreferencesKey("openai_llm_model")
         val geminiModel = stringPreferencesKey("gemini_model")
+        val diarizationProvider = stringPreferencesKey("diarization_provider")
+        val diarizationModel = stringPreferencesKey("diarization_model")
+        val titleProvider = stringPreferencesKey("title_provider")
+        val titleModel = stringPreferencesKey("title_model")
+        val strongProvider = stringPreferencesKey("strong_provider")
+        val strongModel = stringPreferencesKey("strong_model")
         val defaultMode = stringPreferencesKey("default_mode")
         val retentionDays = intPreferencesKey("retention_days")
         val retentionMaxMb = intPreferencesKey("retention_max_mb")
@@ -93,6 +108,17 @@ class SettingsStore(private val context: Context) {
         val defaults = AppSettings()
         val sttProvider = ProviderCatalog.sanitizeSttProvider(this[Keys.sttProvider] ?: defaults.sttProvider)
         val llmProvider = ProviderCatalog.sanitizeLlmProvider(this[Keys.llmProvider] ?: defaults.llmProvider)
+        val requestedDiarizationProvider = ProviderCatalog.sanitizeSttProvider(
+            this[Keys.diarizationProvider] ?: defaults.diarizationProvider,
+        )
+        val requestedDiarizationModel = ProviderCatalog.sanitizeSttModel(
+            requestedDiarizationProvider,
+            this[Keys.diarizationModel] ?: defaults.diarizationModel,
+        )
+        val diarization = ProviderCatalog.compatibleDiarizationSelection(
+            requestedDiarizationProvider,
+            requestedDiarizationModel,
+        )
         return AppSettings(
             sttProvider = sttProvider,
             sttModel = ProviderCatalog.sanitizeSttModel(sttProvider, this[Keys.sttModel] ?: defaults.sttModel),
@@ -100,6 +126,18 @@ class SettingsStore(private val context: Context) {
             groqLlmModel = ProviderCatalog.sanitizeLlmModel(ProviderCatalog.LLM_GROQ, this[Keys.groqLlmModel] ?: defaults.groqLlmModel),
             openAiLlmModel = ProviderCatalog.sanitizeLlmModel(ProviderCatalog.LLM_OPENAI, this[Keys.openAiLlmModel] ?: defaults.openAiLlmModel),
             geminiModel = ProviderCatalog.sanitizeLlmModel(ProviderCatalog.LLM_GEMINI, this[Keys.geminiModel] ?: defaults.geminiModel),
+            diarizationProvider = diarization.first,
+            diarizationModel = diarization.second,
+            titleProvider = ProviderCatalog.sanitizeLlmProvider(this[Keys.titleProvider] ?: defaults.titleProvider),
+            titleModel = ProviderCatalog.sanitizeLlmModel(
+                ProviderCatalog.sanitizeLlmProvider(this[Keys.titleProvider] ?: defaults.titleProvider),
+                this[Keys.titleModel] ?: defaults.titleModel,
+            ),
+            strongProvider = ProviderCatalog.sanitizeLlmProvider(this[Keys.strongProvider] ?: defaults.strongProvider),
+            strongModel = ProviderCatalog.sanitizeLlmModel(
+                ProviderCatalog.sanitizeLlmProvider(this[Keys.strongProvider] ?: defaults.strongProvider),
+                this[Keys.strongModel] ?: defaults.strongModel,
+            ),
             defaultMode = this[Keys.defaultMode]?.let { runCatching { DictationMode.valueOf(it) }.getOrNull() }
                 ?: defaults.defaultMode,
             retentionDays = this[Keys.retentionDays] ?: defaults.retentionDays,
@@ -127,6 +165,25 @@ class SettingsStore(private val context: Context) {
     suspend fun setGroqLlmModel(v: String) = edit { it[Keys.groqLlmModel] = v }
     suspend fun setOpenAiLlmModel(v: String) = edit { it[Keys.openAiLlmModel] = v }
     suspend fun setGeminiModel(v: String) = edit { it[Keys.geminiModel] = v }
+    suspend fun setDiarizationProvider(v: String) = edit {
+        val provider = ProviderCatalog.sanitizeSttProvider(v)
+        val selection = ProviderCatalog.compatibleDiarizationSelection(provider, ProviderCatalog.defaultSttModel(provider))
+        it[Keys.diarizationProvider] = selection.first
+        it[Keys.diarizationModel] = selection.second
+    }
+    suspend fun setDiarizationModel(v: String) = edit { it[Keys.diarizationModel] = v }
+    suspend fun setTitleProvider(v: String) = edit {
+        val provider = ProviderCatalog.sanitizeLlmProvider(v)
+        it[Keys.titleProvider] = provider
+        it[Keys.titleModel] = ProviderCatalog.defaultLlmModel(provider)
+    }
+    suspend fun setTitleModel(v: String) = edit { it[Keys.titleModel] = v }
+    suspend fun setStrongProvider(v: String) = edit {
+        val provider = ProviderCatalog.sanitizeLlmProvider(v)
+        it[Keys.strongProvider] = provider
+        it[Keys.strongModel] = ProviderCatalog.defaultStrongLlmModel(provider)
+    }
+    suspend fun setStrongModel(v: String) = edit { it[Keys.strongModel] = v }
     suspend fun setDefaultMode(v: DictationMode) = edit { it[Keys.defaultMode] = v.name }
     suspend fun setRetentionDays(v: Int) = edit { it[Keys.retentionDays] = v }
     suspend fun setRetentionMaxMb(v: Int) = edit { it[Keys.retentionMaxMb] = v }

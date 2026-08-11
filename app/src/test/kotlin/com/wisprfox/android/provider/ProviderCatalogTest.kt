@@ -5,68 +5,48 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * Guards the RC-3 / P-1 catalog changes (ids verified live 2026-07-07). The
- * behavioural contract that matters: when a model id is REMOVED from the list
- * (a provider retires it), any stale saved pref must coerce to the provider
- * default so the pipeline never sends a dead id and 4xx's on every call — which
- * the user reads as "cleanup randomly does nothing".
- */
+/** Guards current catalog ids and stale-preference self-healing. */
 class ProviderCatalogTest {
-
-    // ── Removed ids coerce to the provider default (first-in-list) ──────────
-
     @Test fun scribeV1CoercesToScribeV2() {
-        // ElevenLabs deletes scribe_v1 on 2026-07-09; saved value must self-heal.
-        assertEquals(
-            "scribe_v2",
-            ProviderCatalog.sanitizeSttModel(ProviderCatalog.STT_ELEVENLABS, "scribe_v1"),
-        )
+        assertEquals("scribe_v2", ProviderCatalog.sanitizeSttModel(ProviderCatalog.STT_ELEVENLABS, "scribe_v1"))
     }
 
     @Test fun distilWhisperCoercesToGroqDefault() {
-        // distil-whisper-large-v3-en no longer listed by Groq.
         assertEquals(
             "whisper-large-v3-turbo",
             ProviderCatalog.sanitizeSttModel(ProviderCatalog.STT_GROQ, "distil-whisper-large-v3-en"),
         )
     }
 
-    @Test fun llamaMaverickCoercesToGroqLlmDefault() {
-        // The invalid "llama-4-maverick" id was replaced with the real Scout id.
+    @Test fun retiredLlamaCoercesToCurrentGroqDefault() {
         assertEquals(
-            "llama-3.3-70b-versatile",
+            "openai/gpt-oss-20b",
             ProviderCatalog.sanitizeLlmModel(ProviderCatalog.LLM_GROQ, "llama-4-maverick"),
         )
     }
 
-    @Test fun deprecatedGeminiCoercesToNewDefault() {
-        // gemini-2.0-flash is in the deprecated set → new default gemini-3.5-flash.
+    @Test fun deprecatedGeminiCoercesToCurrentDefault() {
         assertEquals(
-            "gemini-3.5-flash",
+            "gemini-3.6-flash",
             ProviderCatalog.sanitizeLlmModel(ProviderCatalog.LLM_GEMINI, "gemini-2.0-flash"),
         )
     }
 
-    // ── Valid ids survive sanitisation unchanged ────────────────────────────
-
-    @Test fun validGroqLlm4ScoutSurvives() {
-        val id = "meta-llama/llama-4-scout-17b-16e-instruct"
-        assertEquals(id, ProviderCatalog.sanitizeLlmModel(ProviderCatalog.LLM_GROQ, id))
-    }
-
-    @Test fun validGemini31PreviewSurvives() {
+    @Test fun validCurrentModelsSurvive() {
+        assertEquals(
+            "openai/gpt-oss-120b",
+            ProviderCatalog.sanitizeLlmModel(ProviderCatalog.LLM_GROQ, "openai/gpt-oss-120b"),
+        )
         assertEquals(
             "gemini-3.1-pro-preview",
             ProviderCatalog.sanitizeLlmModel(ProviderCatalog.LLM_GEMINI, "gemini-3.1-pro-preview"),
         )
     }
 
-    @Test fun gemini35FlashIsTheNewDefault() {
-        assertEquals("gemini-3.5-flash", ProviderCatalog.defaultLlmModel(ProviderCatalog.LLM_GEMINI))
+    @Test fun currentDefaultsAreStable() {
+        assertEquals("gemini-3.6-flash", ProviderCatalog.defaultLlmModel(ProviderCatalog.LLM_GEMINI))
+        assertEquals("openai/gpt-oss-120b", ProviderCatalog.defaultStrongLlmModel(ProviderCatalog.LLM_GROQ))
     }
-
-    // ── List membership: removed ids are truly gone ─────────────────────────
 
     @Test fun removedIdsNotInLists() {
         assertFalse(ProviderCatalog.sttModelsFor(ProviderCatalog.STT_GROQ).any { it.id == "distil-whisper-large-v3-en" })
@@ -74,17 +54,24 @@ class ProviderCatalogTest {
         assertFalse(ProviderCatalog.llmModelsFor(ProviderCatalog.LLM_GROQ).any { it.id == "llama-4-maverick" })
     }
 
-    @Test fun scoutAndGeminiAdditionsPresent() {
-        assertTrue(ProviderCatalog.llmModelsFor(ProviderCatalog.LLM_GROQ).any { it.id == "meta-llama/llama-4-scout-17b-16e-instruct" })
-        assertTrue(ProviderCatalog.llmModelsFor(ProviderCatalog.LLM_GEMINI).any { it.id == "gemini-3.5-flash" })
-        assertTrue(ProviderCatalog.llmModelsFor(ProviderCatalog.LLM_GEMINI).any { it.id == "gemini-3.1-pro-preview" })
+    @Test fun currentCatalogAdditionsPresent() {
+        assertTrue(ProviderCatalog.llmModelsFor(ProviderCatalog.LLM_GROQ).any { it.id == "openai/gpt-oss-120b" })
+        assertTrue(ProviderCatalog.llmModelsFor(ProviderCatalog.LLM_GROQ).any { it.id == "qwen/qwen3.6-27b" })
+        assertTrue(ProviderCatalog.llmModelsFor(ProviderCatalog.LLM_GEMINI).any { it.id == "gemini-3.6-flash" })
+        assertTrue(ProviderCatalog.sttModelsFor(ProviderCatalog.STT_OPENAI).any { it.id == "gpt-4o-transcribe-diarize" })
     }
 
-    // ── shortModel labels track the catalog ─────────────────────────────────
-
-    @Test fun shortModelLabelsForNewIds() {
-        assertEquals("Llama 4 Scout", ProviderCatalog.shortModel("meta-llama/llama-4-scout-17b-16e-instruct"))
-        assertEquals("Gemini 3.5 Flash", ProviderCatalog.shortModel("gemini-3.5-flash"))
+    @Test fun shortModelLabelsTrackCatalog() {
+        assertEquals("GPT-OSS 120B", ProviderCatalog.shortModel("openai/gpt-oss-120b"))
+        assertEquals("Qwen 3.6 27B", ProviderCatalog.shortModel("qwen/qwen3.6-27b"))
+        assertEquals("Gemini 3.6 Flash", ProviderCatalog.shortModel("gemini-3.6-flash"))
         assertEquals("Gemini 3.1 Pro", ProviderCatalog.shortModel("gemini-3.1-pro-preview"))
+    }
+
+    @Test fun diarizationFallsBackToDeepgramNova3() {
+        assertEquals(
+            ProviderCatalog.STT_DEEPGRAM to "nova-3",
+            ProviderCatalog.compatibleDiarizationSelection(ProviderCatalog.STT_GROQ, "whisper-large-v3"),
+        )
     }
 }

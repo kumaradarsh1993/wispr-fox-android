@@ -11,4 +11,4 @@ package com.wisprfox.android.settings
  * SettingsStore parses this with a valueOf-with-fallback, so a saved value from
  * an older build that predates a new entry safely falls back to the default.
  */
-enum class Avatar { FOX, CLIPPY, ORU_GUJIA, SIRI }
+enum class Avatar { FOX, CODEX_FOX, SPARK_BUDDY, CLIPPY, ORU_GUJIA, SIRI }

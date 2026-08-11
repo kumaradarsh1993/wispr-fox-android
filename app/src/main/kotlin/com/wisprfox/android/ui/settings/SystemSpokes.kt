@@ -24,6 +24,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -45,6 +46,12 @@ import com.wisprfox.android.ui.ToggleRow
 import com.wisprfox.android.ui.UsageMeterRow
 import com.wisprfox.android.ui.rememberUsageSnapshot
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /* ── 4 · Delivery ────────────────────────────────────────────────────────── */
 
@@ -81,9 +88,11 @@ fun DeliverySpoke(onBack: () -> Unit) {
 
         PermissionCard(
             title = "Auto-paste access",
-            subtitle = "Lets Foxy place text in the focused field. Without it, text is copied for you to paste yourself.",
+            subtitle = if (android.os.Build.MANUFACTURER.equals("samsung", ignoreCase = true))
+                "On Samsung: Installed apps → wispr-fox → turn it on → Allow. Android does not permit apps to open the final service switch directly."
+            else "Open Downloaded apps / Installed services, choose wispr-fox, turn it on, then Allow.",
             granted = a11yOn,
-            cta = "Open Accessibility settings",
+            cta = if (a11yOn) "Accessibility is on" else "Open Accessibility",
             onClick = { ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
         )
         PermissionCard(
@@ -167,8 +176,24 @@ fun StorageSpoke(onBack: () -> Unit) {
     val container = remember { WisprFoxApp.container(ctx) }
     val scope = rememberCoroutineScope()
     val settings by container.settingsStore.settings.collectAsState(initial = AppSettings())
+    var storage by remember { mutableStateOf(com.wisprfox.android.history.RecordingRepository.AudioStorage(0, 0)) }
+    var confirmClearAudio by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        val recorded = container.recordings.audioStorage()
+        val staged = container.importController.stagedStorage()
+        storage = com.wisprfox.android.history.RecordingRepository.AudioStorage(recorded.files + staged.first, recorded.bytes + staged.second)
+    }
 
     SpokeScaffold("Storage", onBack) {
+        SectionCard("On this phone") {
+            Text("${storage.files} audio file${if (storage.files == 1) "" else "s"} · ${formatStorage(storage.bytes)}",
+                style = MaterialTheme.typography.bodyLarge)
+            Text("Transcripts stay when local audio is cleared.", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            OutlinedButton(onClick = { confirmClearAudio = true }, enabled = storage.files > 0, modifier = Modifier.fillMaxWidth()) {
+                Text("Clear local audio")
+            }
+        }
         SectionCard("Keep audio for") {
             var days by remember(settings.retentionDays) { mutableStateOf(settings.retentionDays.toFloat()) }
             Text(
@@ -204,6 +229,27 @@ fun StorageSpoke(onBack: () -> Unit) {
             )
         }
     }
+    if (confirmClearAudio) AlertDialog(
+        onDismissRequest = { confirmClearAudio = false },
+        title = { Text("Clear ${storage.files} audio files?") },
+        text = { Text("Raw, Clean, Draft, Meeting Notes, and synced transcripts stay. Playback and re-transcription will no longer be available for these rows.") },
+        confirmButton = { Button(onClick = {
+            confirmClearAudio = false
+            scope.launch {
+                container.recordings.clearAllAudio()
+                container.importController.clearStaged()
+                storage = container.recordings.audioStorage()
+            }
+        }) { Text("Clear audio") } },
+        dismissButton = { TextButton(onClick = { confirmClearAudio = false }) { Text("Cancel") } },
+    )
+}
+
+private fun formatStorage(bytes: Long): String = when {
+    bytes >= 1024L * 1024 * 1024 -> "%.2f GB".format(bytes / 1024.0 / 1024.0 / 1024.0)
+    bytes >= 1024L * 1024 -> "%.1f MB".format(bytes / 1024.0 / 1024.0)
+    bytes >= 1024 -> "%.0f KB".format(bytes / 1024.0)
+    else -> "$bytes B"
 }
 
 /* ── 7 · Account ─────────────────────────────────────────────────────────── */
@@ -299,6 +345,11 @@ private fun PurgeSection(syncEngine: com.wisprfox.android.sync.SyncEngine) {
 
 @Composable
 fun AboutSpoke(onBack: () -> Unit, onReplayOnboarding: () -> Unit) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var checking by remember { mutableStateOf(false) }
+    var releases by remember { mutableStateOf<ReleaseSnapshot?>(null) }
+    var updateError by remember { mutableStateOf<String?>(null) }
     SpokeScaffold("About", onBack) {
         SectionCard("wispr-fox for Android") {
             Text(
@@ -313,10 +364,100 @@ fun AboutSpoke(onBack: () -> Unit, onReplayOnboarding: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        SectionCard("Updates") {
+            Text(
+                releases?.let {
+                    "Stable ${it.stableTag ?: "not found"}${if (it.stableNewer) " · update available" else ""}\n" +
+                        "Nightly ${it.nightlyTag ?: "not found"}${if (it.nightlyNewer) " · update available" else ""}"
+                }
+                    ?: "Check GitHub for the newest stable and nightly builds.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            updateError?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
+            Button(
+                onClick = {
+                    checking = true; updateError = null
+                    scope.launch {
+                        runCatching { fetchReleases() }
+                            .onSuccess { releases = it }
+                            .onFailure { updateError = "Couldn't check right now. You can still open Releases." }
+                        checking = false
+                    }
+                },
+                enabled = !checking,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(if (checking) "Checking…" else "Check for updates") }
+            OutlinedButton(
+                onClick = {
+                    val url = releases?.nightlyApk ?: releases?.nightlyUrl ?: "https://github.com/kumaradarsh1993/wispr-fox-android/releases"
+                    ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Download latest nightly") }
+            OutlinedButton(
+                onClick = {
+                    val url = releases?.stableApk ?: releases?.stableUrl ?: "https://github.com/kumaradarsh1993/wispr-fox-android/releases/latest"
+                    ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Download latest stable") }
+        }
         OutlinedButton(onClick = onReplayOnboarding, modifier = Modifier.fillMaxWidth()) {
             Text("Replay setup guide")
         }
     }
+}
+
+private data class ReleaseSnapshot(
+    val stableTag: String?,
+    val stableUrl: String?,
+    val stableApk: String?,
+    val stableNewer: Boolean,
+    val nightlyTag: String?,
+    val nightlyUrl: String?,
+    val nightlyApk: String?,
+    val nightlyNewer: Boolean,
+)
+
+private suspend fun fetchReleases(): ReleaseSnapshot = withContext(Dispatchers.IO) {
+    val request = okhttp3.Request.Builder()
+        .url("https://api.github.com/repos/kumaradarsh1993/wispr-fox-android/releases?per_page=20")
+        .header("Accept", "application/vnd.github+json")
+        .build()
+    okhttp3.OkHttpClient().newCall(request).execute().use { response ->
+        if (!response.isSuccessful) error("HTTP ${response.code}")
+        val rows = Json.parseToJsonElement(response.body?.string().orEmpty()).jsonArray
+        val stable = rows.firstOrNull { it.jsonObject["prerelease"]?.jsonPrimitive?.content == "false" }
+        val nightly = rows.firstOrNull { it.jsonObject["prerelease"]?.jsonPrimitive?.content == "true" }
+        fun apk(row: kotlinx.serialization.json.JsonElement?): String? = row?.jsonObject?.get("assets")?.jsonArray
+            ?.firstOrNull { it.jsonObject["name"]?.jsonPrimitive?.content?.endsWith(".apk", ignoreCase = true) == true }
+            ?.jsonObject?.get("browser_download_url")?.jsonPrimitive?.content
+        val stableTag = stable?.jsonObject?.get("tag_name")?.jsonPrimitive?.content
+        val nightlyTag = nightly?.jsonObject?.get("tag_name")?.jsonPrimitive?.content
+        ReleaseSnapshot(
+            stableTag,
+            stable?.jsonObject?.get("html_url")?.jsonPrimitive?.content,
+            apk(stable),
+            isNewer(stableTag, BuildConfig.VERSION_NAME),
+            nightlyTag,
+            nightly?.jsonObject?.get("html_url")?.jsonPrimitive?.content,
+            apk(nightly),
+            isNewer(nightlyTag, BuildConfig.VERSION_NAME),
+        )
+    }
+}
+
+private fun isNewer(tag: String?, current: String): Boolean {
+    fun parts(value: String): List<Int> = value.removePrefix("v").substringBefore('-')
+        .split('.').map { it.toIntOrNull() ?: 0 }
+    val candidate = tag?.let(::parts) ?: return false
+    val installed = parts(current)
+    val count = maxOf(candidate.size, installed.size)
+    return (0 until count).firstNotNullOfOrNull { index ->
+        val difference = candidate.getOrElse(index) { 0 } - installed.getOrElse(index) { 0 }
+        difference.takeIf { it != 0 }
+    }?.let { it > 0 } ?: false
 }
 
 /* ── helpers ─────────────────────────────────────────────────────────────── */

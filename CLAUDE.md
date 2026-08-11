@@ -2,7 +2,7 @@
 
 > ## 🟢 CURRENT STATE — see HANDOVER (this block last touched 2026-07-18)
 >
-> Current stable is **v2.1.0** (Latest, promoted 2026-07-18) — accounts + cross-device sync (was v2.0.0-nightly.1), a full UI redesign + dark theme (v2.1.0-nightly.1), and ownership-scoped delete + Purge (v2.1.0-nightly.2), rolled up onto commit `933652f` (`versionCode = 17`). Previous stable: **v1.4.0** (audio-file import); before that `v1.1.0` (commit `4cf396b`). ⚠️ The delete/purge round-trips went stable **runtime-unverified** (green tests + CI build, no live backend run) — a deliberate live test is the first owed follow-up. **[HANDOVER.md](./HANDOVER.md) is the single source of truth** for what ships today, what's queued, and how to resume — read it first; it wins over this file wherever they disagree.
+> Current stable is **v2.1.0** (promoted 2026-07-18). **v2.2.0-nightly.1** (`versionCode = 18`) is the 2026-08-11 Android meeting/share/readability candidate and must remain nightly until S23 Ultra QA passes. The delete/purge round-trips from v2.1.0 also remain runtime-unverified. **[HANDOVER.md](./HANDOVER.md) is the single source of truth** for what ships today, what's queued, and how to resume — read it first; it wins over this file wherever they disagree.
 >
 > [CODEX_HANDOVER_2026-06-29.md](./CODEX_HANDOVER_2026-06-29.md) is **archived/historical** (the Codex agent is retired; its `v1.2.0-codex.2` preview was superseded by v1.4.0 and the v2.x line). Not required reading.
 >

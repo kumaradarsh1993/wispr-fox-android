@@ -42,3 +42,15 @@ fun AppSettings.withRecordingOverrides(rec: Recording): AppSettings {
     }
     return s
 }
+
+/** Point one generation stage at an independent provider/model default. */
+fun AppSettings.withLlmSelection(providerRaw: String, modelRaw: String): AppSettings {
+    val provider = ProviderCatalog.sanitizeLlmProvider(providerRaw)
+    val model = ProviderCatalog.sanitizeLlmModel(provider, modelRaw)
+    return copy(
+        llmProvider = provider,
+        groqLlmModel = if (provider == ProviderCatalog.LLM_GROQ) model else groqLlmModel,
+        openAiLlmModel = if (provider == ProviderCatalog.LLM_OPENAI) model else openAiLlmModel,
+        geminiModel = if (provider == ProviderCatalog.LLM_GEMINI) model else geminiModel,
+    )
+}

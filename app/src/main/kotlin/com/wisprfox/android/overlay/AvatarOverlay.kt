@@ -185,7 +185,8 @@ fun AvatarOverlay(
                         )
                         when (snapshot.pipeline) {
                             PipelineState.RECORDING -> VoiceBars()
-                            PipelineState.TRANSCRIBING, PipelineState.CLEANING, PipelineState.INJECTING -> ThinkingDots()
+                            PipelineState.IMPORTING, PipelineState.TRANSCRIBING, PipelineState.DIARIZING, PipelineState.CLEANING,
+                            PipelineState.DRAFTING, PipelineState.MEETING_NOTES, PipelineState.INJECTING -> ThinkingDots()
                             PipelineState.DONE -> if (snapshot.message != null) DoneTick()
                             else -> {}
                         }

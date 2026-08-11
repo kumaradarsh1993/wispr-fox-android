@@ -40,21 +40,62 @@ fun TranscriptionSpoke(onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val settings by container.settingsStore.settings.collectAsState(initial = AppSettings())
 
-    SpokeScaffold("Transcription", onBack) {
-        SectionCard("Service") {
+    SpokeScaffold("AI & models", onBack) {
+        SectionCard("Transcription") {
             ProviderChips(
                 options = ProviderCatalog.sttProviders,
                 selected = settings.sttProvider,
                 onSelect = { scope.launch { container.settingsStore.setSttProvider(it) } },
             )
-        }
-
-        SectionCard("Model") {
             ModelChips(
                 options = ProviderCatalog.sttModelsFor(settings.sttProvider),
                 selected = settings.sttModel,
                 onSelect = { scope.launch { container.settingsStore.setSttModel(it) } },
             )
+        }
+
+        SectionCard("Speaker labels") {
+            Text(
+                "Used automatically when diarization is selected for an upload.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            ProviderChips(
+                options = ProviderCatalog.sttProviders.filter { it.id == ProviderCatalog.STT_DEEPGRAM },
+                selected = settings.diarizationProvider,
+                onSelect = { scope.launch { container.settingsStore.setDiarizationProvider(it) } },
+            )
+            ModelChips(
+                options = ProviderCatalog.sttModelsFor(settings.diarizationProvider),
+                selected = settings.diarizationModel,
+                onSelect = { scope.launch { container.settingsStore.setDiarizationModel(it) } },
+            )
+        }
+
+        SectionCard("Cleanup") {
+            ProviderChips(ProviderCatalog.llmProviders, settings.llmProvider) {
+                scope.launch { container.settingsStore.setLlmProvider(it) }
+            }
+            ModelChips(ProviderCatalog.llmModelsFor(settings.llmProvider), settings.activeLlmModel) { model ->
+                scope.launch {
+                    when (settings.llmProvider) {
+                        AppSettings.PROVIDER_OPENAI -> container.settingsStore.setOpenAiLlmModel(model)
+                        AppSettings.PROVIDER_GEMINI -> container.settingsStore.setGeminiModel(model)
+                        else -> container.settingsStore.setGroqLlmModel(model)
+                    }
+                }
+            }
+        }
+
+        SectionCard("Titles") {
+            ProviderChips(ProviderCatalog.llmProviders, settings.titleProvider) { scope.launch { container.settingsStore.setTitleProvider(it) } }
+            ModelChips(ProviderCatalog.llmModelsFor(settings.titleProvider), settings.titleModel) { scope.launch { container.settingsStore.setTitleModel(it) } }
+        }
+
+        SectionCard("Draft & Meeting Notes") {
+            Text("Uses a stronger default than cleanup.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            ProviderChips(ProviderCatalog.llmProviders, settings.strongProvider) { scope.launch { container.settingsStore.setStrongProvider(it) } }
+            ModelChips(ProviderCatalog.llmModelsFor(settings.strongProvider), settings.strongModel) { scope.launch { container.settingsStore.setStrongModel(it) } }
         }
 
         KeySection(
@@ -64,6 +105,14 @@ fun TranscriptionSpoke(onBack: () -> Unit) {
             secrets = container.secrets,
             labelFor = { "${ProviderCatalog.label(it)} key" },
             footer = "Audio is sent only to the provider selected here. Keys stay encrypted on this phone.",
+        )
+        KeySection(
+            selectedProvider = settings.llmProvider,
+            providers = ProviderCatalog.llmProviders,
+            keyFor = ::llmKeyFor,
+            secrets = container.secrets,
+            labelFor = { "${ProviderCatalog.label(it)} AI key" },
+            footer = "Keys stay encrypted on this phone and can be reused across cleanup, titles, drafts, and meeting notes.",
         )
     }
 }

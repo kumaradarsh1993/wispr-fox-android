@@ -42,7 +42,8 @@ object AudioImporter {
     fun decodeToWav(context: Context, uri: Uri, outFile: File): Result {
         val extractor = MediaExtractor()
         try {
-            extractor.setDataSource(context, uri, null)
+            if (uri.scheme == "file") extractor.setDataSource(requireNotNull(uri.path))
+            else extractor.setDataSource(context, uri, null)
         } catch (e: Exception) {
             throw ImportException("Couldn't open that file — it may be missing or an unsupported type.", e)
         }

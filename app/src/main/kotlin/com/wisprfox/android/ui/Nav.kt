@@ -3,6 +3,8 @@ package com.wisprfox.android.ui
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -11,9 +13,11 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.height
 
 /** Where the bottom bar currently is — keeps Home/History one tap apart. */
-enum class NavTab { HOME, HISTORY }
+enum class NavTab { SPEAK, UPLOAD, HISTORY, USAGE }
 
 /**
  * Bottom NavigationBar shared between [HomeScreen] and [HistoryScreen]. We
@@ -25,30 +29,25 @@ enum class NavTab { HOME, HISTORY }
 @Composable
 fun WisprBottomBar(current: NavTab, onSelect: (NavTab) -> Unit) {
     NavigationBar(
+        modifier = Modifier.height(64.dp),
         containerColor = MaterialTheme.colorScheme.surface,
         tonalElevation = 0.dp,
     ) {
-        NavigationBarItem(
-            selected = current == NavTab.HOME,
-            onClick = { if (current != NavTab.HOME) onSelect(NavTab.HOME) },
-            icon = { Icon(Icons.Filled.Mic, contentDescription = null) },
-            label = { Text("Speak") },
+        listOf(
+            Triple(NavTab.SPEAK, Icons.Filled.Mic, "Speak"),
+            Triple(NavTab.UPLOAD, Icons.Filled.FileUpload, "Upload"),
+            Triple(NavTab.HISTORY, Icons.Filled.History, "History"),
+            Triple(NavTab.USAGE, Icons.Filled.Insights, "Usage"),
+        ).forEach { (tab, icon, label) -> NavigationBarItem(
+            selected = current == tab,
+            onClick = { if (current != tab) onSelect(tab) },
+            icon = { Icon(icon, contentDescription = null) },
+            label = { Text(label, style = MaterialTheme.typography.labelSmall) },
             colors = NavigationBarItemDefaults.colors(
                 selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
                 selectedTextColor = MaterialTheme.colorScheme.primary,
                 indicatorColor = MaterialTheme.colorScheme.primaryContainer,
             ),
-        )
-        NavigationBarItem(
-            selected = current == NavTab.HISTORY,
-            onClick = { if (current != NavTab.HISTORY) onSelect(NavTab.HISTORY) },
-            icon = { Icon(Icons.Filled.History, contentDescription = null) },
-            label = { Text("History") },
-            colors = NavigationBarItemDefaults.colors(
-                selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                selectedTextColor = MaterialTheme.colorScheme.primary,
-                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-            ),
-        )
+        ) }
     }
 }

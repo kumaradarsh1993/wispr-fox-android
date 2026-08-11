@@ -33,6 +33,9 @@ jobs:
           test -s app/schemas/com.wisprfox.android.history.AppDatabase/2.json
           test -s app/schemas/com.wisprfox.android.history.AppDatabase/3.json
           test -s app/schemas/com.wisprfox.android.history.AppDatabase/4.json
+          test -s app/schemas/com.wisprfox.android.history.AppDatabase/5.json
+          test -s app/schemas/com.wisprfox.android.history.AppDatabase/6.json
+          test -s app/schemas/com.wisprfox.android.history.AppDatabase/7.json
 
       - name: Test and build release APK
         run: |

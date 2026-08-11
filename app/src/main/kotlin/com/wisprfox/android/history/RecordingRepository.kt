@@ -19,6 +19,12 @@ data class Recording(
     val transcript: String?,
     val cleanedText: String?,
     val draftedText: String?,
+    val title: String?,
+    val meetingNotesText: String?,
+    val speakerTurns: String?,
+    val speakerNames: String?,
+    val isMeeting: Boolean,
+    val diarizationEnabled: Boolean,
     val sttProvider: String?,
     val llmProvider: String?,
     val targetPackage: String?,
@@ -31,6 +37,13 @@ data class Recording(
     val llmProviderOverride: String? = null,
     val llmModelOverride: String? = null,
     val imported: Boolean = false,
+    val requestedOutputs: String = "",
+    val strongProviderOverride: String? = null,
+    val strongModelOverride: String? = null,
+    val sourceName: String? = null,
+    val sourceModifiedAt: Long? = null,
+    val batchId: String? = null,
+    val batchOrder: Int = 0,
     /** Sync/accounts (schema v5). Null platform means "this device" (mobile). */
     val platform: String? = null,
     val deviceName: String? = null,
@@ -39,11 +52,14 @@ data class Recording(
     val remote: Boolean = false,
 ) {
     /** Best text available for the row's own mode (for previews / delivery). */
-    fun primaryText(): String? = when (mode) {
+    fun primaryText(): String? = when {
+        isMeeting && !meetingNotesText.isNullOrBlank() -> meetingNotesText
+        else -> when (mode) {
         DictationMode.RAW -> transcript
         DictationMode.CLEANED -> cleanedText ?: transcript
         DictationMode.ADVANCED -> cleanedText ?: transcript
         DictationMode.REFORMATTED -> draftedText ?: transcript
+        }
     }
 
     /** Badge label for [platform] — local rows (null) read as "Mobile". */
@@ -68,6 +84,11 @@ data class RemotePulledNote(
     val transcript: String?,
     val cleanedText: String?,
     val draftedText: String?,
+    val meetingNotesText: String?,
+    val speakerTurns: String?,
+    val speakerNames: String?,
+    val isMeeting: Boolean,
+    val diarizationEnabled: Boolean,
     val durationMs: Long,
     val sttProvider: String?,
     val llmProvider: String?,
@@ -86,6 +107,12 @@ private fun RecordingEntity.toDomain() = Recording(
     transcript = transcript,
     cleanedText = cleanedText,
     draftedText = draftedText,
+    title = title,
+    meetingNotesText = meetingNotesText,
+    speakerTurns = speakerTurns,
+    speakerNames = speakerNames,
+    isMeeting = isMeeting,
+    diarizationEnabled = diarizationEnabled,
     sttProvider = sttProvider,
     llmProvider = llmProvider,
     targetPackage = targetPackage,
@@ -98,6 +125,13 @@ private fun RecordingEntity.toDomain() = Recording(
     llmProviderOverride = llmProviderOverride,
     llmModelOverride = llmModelOverride,
     imported = imported,
+    requestedOutputs = requestedOutputs,
+    strongProviderOverride = strongProviderOverride,
+    strongModelOverride = strongModelOverride,
+    sourceName = sourceName,
+    sourceModifiedAt = sourceModifiedAt,
+    batchId = batchId,
+    batchOrder = batchOrder,
     platform = platform,
     deviceName = deviceName,
     remote = remote,
@@ -172,12 +206,21 @@ class RecordingRepository(
         sttModel: String,
         llmProvider: String,
         llmModel: String,
+        diarizationEnabled: Boolean = false,
+        requestedOutputs: String = "",
+        strongProvider: String? = null,
+        strongModel: String? = null,
+        sourceName: String? = null,
+        sourceModifiedAt: Long? = null,
+        batchId: String? = null,
+        batchOrder: Int = 0,
+        createdAt: Long = System.currentTimeMillis(),
     ): String {
         val id = UUID.randomUUID().toString()
         dao.insert(
             RecordingEntity(
                 id = id,
-                createdAt = System.currentTimeMillis(),
+                createdAt = createdAt,
                 audioPath = audioPath,
                 mode = mode.toRaw(),
                 status = RecordingStatus.IMPORTING.raw,
@@ -187,6 +230,15 @@ class RecordingRepository(
                 llmProviderOverride = llmProvider,
                 llmModelOverride = llmModel,
                 imported = true,
+                diarizationEnabled = diarizationEnabled,
+                isMeeting = diarizationEnabled || requestedOutputs.split(',').contains("meeting"),
+                requestedOutputs = requestedOutputs,
+                strongProviderOverride = strongProvider,
+                strongModelOverride = strongModel,
+                sourceName = sourceName,
+                sourceModifiedAt = sourceModifiedAt,
+                batchId = batchId,
+                batchOrder = batchOrder,
             )
         )
         return id
@@ -225,11 +277,65 @@ class RecordingRepository(
         when (kind) {
             AltKind.CLEANED -> dao.setCleaned(id, text, provider, used, note)
             AltKind.DRAFTED -> dao.setDrafted(id, text, provider, used, note)
+            AltKind.MEETING_NOTES -> dao.setMeetingNotes(id, text, provider, used, note)
         }
         dao.markDirty(id, System.currentTimeMillis())
         // Only a real LLM call counts; a graceful degrade to raw (missing key /
         // provider down) sets used=false and must NOT inflate the usage meter.
         if (used) tallyLlm(provider)
+    }
+
+    suspend fun setMeetingMetadata(id: String, turnsJson: String?, isMeeting: Boolean, diarized: Boolean) {
+        dao.setMeetingMetadata(id, turnsJson, isMeeting, diarized)
+        dao.markDirty(id, System.currentTimeMillis())
+    }
+
+    suspend fun setTitle(id: String, title: String) {
+        dao.setTitle(id, title)
+        dao.markDirty(id, System.currentTimeMillis())
+    }
+
+    suspend fun setSpeakerNames(id: String, namesJson: String) {
+        dao.setSpeakerNames(id, namesJson)
+        dao.markDirty(id, System.currentTimeMillis())
+    }
+
+    suspend fun setRequestedOutputs(id: String, outputs: String) = dao.setRequestedOutputs(id, outputs)
+
+    suspend fun setProcessingOverrides(
+        id: String,
+        sttProvider: String,
+        sttModel: String,
+        llmProvider: String,
+        llmModel: String,
+        strongProvider: String,
+        strongModel: String,
+    ) = dao.setProcessingOverrides(id, sttProvider, sttModel, llmProvider, llmModel, strongProvider, strongModel)
+
+    data class AudioStorage(val files: Int, val bytes: Long)
+
+    suspend fun audioStorage(): AudioStorage {
+        val files = dao.listAll().map { File(it.audioPath) }.filter { it.isFile }
+        return AudioStorage(files.size, files.sumOf { it.length() })
+    }
+
+    /** Delete local audio while retaining transcripts and cloud history. */
+    suspend fun clearAllAudio(): AudioStorage {
+        var files = 0
+        var bytes = 0L
+        for (row in dao.listAll()) {
+            val file = File(row.audioPath)
+            if (file.isFile) {
+                bytes += file.length()
+                if (runCatching { file.delete() }.getOrDefault(false)) {
+                    files++
+                    dao.clearAudioPath(row.id)
+                }
+            } else {
+                dao.clearAudioPath(row.id)
+            }
+        }
+        return AudioStorage(files, bytes)
     }
 
     /**
@@ -387,6 +493,12 @@ class RecordingRepository(
                 transcript = note.transcript,
                 cleanedText = note.cleanedText,
                 draftedText = note.draftedText,
+                title = note.title,
+                meetingNotesText = note.meetingNotesText,
+                speakerTurns = note.speakerTurns,
+                speakerNames = note.speakerNames,
+                isMeeting = note.isMeeting,
+                diarizationEnabled = note.diarizationEnabled,
                 sttProvider = note.sttProvider,
                 llmProvider = note.llmProvider,
                 imported = note.origin == "upload",

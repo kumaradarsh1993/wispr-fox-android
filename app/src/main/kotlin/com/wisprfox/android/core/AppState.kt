@@ -13,7 +13,9 @@ import kotlinx.coroutines.flow.update
  *   RECORDING → listening · TRANSCRIBING/CLEANING → thinking/writing ·
  *   INJECTING/DONE → success · ERROR → error art.
  */
-enum class PipelineState { IDLE, RECORDING, TRANSCRIBING, CLEANING, INJECTING, DONE, ERROR }
+enum class PipelineState {
+    IDLE, RECORDING, IMPORTING, TRANSCRIBING, DIARIZING, CLEANING, DRAFTING, MEETING_NOTES, INJECTING, DONE, ERROR,
+}
 
 /**
  * Process-wide UI state shared by the overlay avatar, the Quick Settings tile,

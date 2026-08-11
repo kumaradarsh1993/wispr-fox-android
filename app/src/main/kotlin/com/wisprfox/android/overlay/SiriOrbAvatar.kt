@@ -47,7 +47,8 @@ fun SiriOrbAvatar(state: PipelineState, modifier: Modifier) {
     // transcribing/cleaning; slow at rest — mirrors the desktop --spin var.
     val spinMs = when (state) {
         PipelineState.RECORDING -> 4500
-        PipelineState.TRANSCRIBING, PipelineState.CLEANING, PipelineState.INJECTING -> 2200
+        PipelineState.IMPORTING, PipelineState.TRANSCRIBING, PipelineState.DIARIZING, PipelineState.CLEANING,
+        PipelineState.DRAFTING, PipelineState.MEETING_NOTES, PipelineState.INJECTING -> 2200
         else -> 11000
     }
 

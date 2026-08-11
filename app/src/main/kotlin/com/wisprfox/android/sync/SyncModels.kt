@@ -30,6 +30,12 @@ data class RemoteNote(
     val transcript: String? = null,
     val cleaned_text: String? = null,
     val drafted_text: String? = null,
+    val meeting_notes_text: String? = null,
+    /** JSON contract: {"version":1,"turns":[...]} */
+    val speaker_turns: String? = null,
+    val speaker_names: String? = null,
+    val is_meeting: Boolean = false,
+    val diarization_enabled: Boolean = false,
     val duration_ms: Long = 0,
     val stt_provider: String? = null,
     val llm_provider: String? = null,

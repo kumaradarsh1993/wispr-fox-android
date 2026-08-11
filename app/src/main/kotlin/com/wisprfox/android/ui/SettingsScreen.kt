@@ -106,15 +106,9 @@ fun SettingsScreen(
         ScreenColumn(Modifier.padding(inner), gap = Space.listGap) {
             SettingsRow(
                 icon = Icons.Filled.Mic,
-                title = "Transcription",
-                summary = "${ProviderCatalog.label(settings.sttProvider)} · ${ProviderCatalog.shortModel(settings.sttModel)}",
+                title = "AI & models",
+                summary = "${ProviderCatalog.shortModel(settings.sttModel)} · ${ProviderCatalog.shortModel(settings.activeLlmModel)} · ${ProviderCatalog.shortModel(settings.strongModel)}",
                 onClick = { onOpenSpoke(SettingsSpoke.TRANSCRIPTION) },
-            )
-            SettingsRow(
-                icon = Icons.Filled.AutoAwesome,
-                title = "Cleanup & modes",
-                summary = "${settings.defaultMode.label} · ${ProviderCatalog.shortModel(settings.activeLlmModel)} on ${ProviderCatalog.label(settings.llmProvider)}",
-                onClick = { onOpenSpoke(SettingsSpoke.CLEANUP) },
             )
             SettingsRow(
                 icon = Icons.Filled.Pets,

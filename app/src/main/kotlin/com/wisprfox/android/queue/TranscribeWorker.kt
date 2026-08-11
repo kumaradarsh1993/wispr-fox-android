@@ -20,6 +20,7 @@ import com.wisprfox.android.overlay.OverlayVisibility
 import com.wisprfox.android.provider.CleanupOrchestrator
 import com.wisprfox.android.provider.DictationMode
 import com.wisprfox.android.provider.ProviderCatalog
+import com.wisprfox.android.provider.Prompts
 import com.wisprfox.android.provider.SttError
 import com.wisprfox.android.sync.SyncWorker
 import kotlinx.coroutines.CancellationException
@@ -115,8 +116,13 @@ class TranscribeWorker(
 
         val transcript = try {
             val stt = container.providerFactory.stt(settings)
-            stt.transcribe(rec.audioPath, settings.languageHint).also {
+            stt.transcribe(rec.audioPath, settings.languageHint, rec.diarizationEnabled).also {
                 recordings.setTranscript(id, it.text, stt.name)
+                if (rec.diarizationEnabled || rec.isMeeting) {
+                    recordings.setStatus(id, RecordingStatus.DIARIZING)
+                    if (AppState.state.value.activeRecordingId == id) AppState.setPipeline(PipelineState.DIARIZING)
+                    recordings.setMeetingMetadata(id, it.speakerTurnsJson, true, rec.diarizationEnabled)
+                }
             }
         } catch (e: MissingKeyException) {
             return fail(id, e.message ?: "API key missing")
@@ -129,33 +135,64 @@ class TranscribeWorker(
         }
 
         // ── LLM cleanup / drafting (skipped for RAW) ─────────────────────────
-        val finalText: String = if (rec.mode.usesLlm) {
+        val requested = rec.requestedOutputs.split(',').map(String::trim).filter(String::isNotBlank).toSet()
+        val wantClean = "cleaned" in requested ||
+            (requested.isEmpty() && rec.mode in setOf(DictationMode.CLEANED, DictationMode.ADVANCED))
+        val wantDraft = "drafted" in requested ||
+            (requested.isEmpty() && rec.mode == DictationMode.REFORMATTED)
+        val wantMeeting = "meeting" in requested
+        var cleaned: String? = null
+        var drafted: String? = null
+        var meeting: String? = null
+
+        if (wantClean) {
             recordings.setStatus(id, RecordingStatus.CLEANING)
-            if (AppState.state.value.activeRecordingId == id) {
-                AppState.setPipeline(PipelineState.CLEANING)
-            }
-            try {
-                val llm = container.providerFactory.llm(settings)
-                val result = CleanupOrchestrator().clean(
-                    raw = transcript.text,
-                    mode = rec.mode,
-                    systemOverride = null,
-                    contextHint = null,
-                    provider = llm,
-                )
-                val altKind = if (rec.mode == DictationMode.REFORMATTED) AltKind.DRAFTED else AltKind.CLEANED
-                recordings.setAlt(id, altKind, result.text, llm.name, result.usedLlm, result.note)
-                result.text
-            } catch (e: MissingKeyException) {
-                // No LLM key — degrade gracefully to the raw transcript.
-                AppState.toast("Using raw transcript - ${e.providerLabel} key missing")
-                val altKind = if (rec.mode == DictationMode.REFORMATTED) AltKind.DRAFTED else AltKind.CLEANED
-                recordings.setAlt(id, altKind, transcript.text, settings.llmProvider, false, "clippy_missing_key")
-                transcript.text
-            }
-        } else {
-            transcript.text
+            if (AppState.state.value.activeRecordingId == id) AppState.setPipeline(PipelineState.CLEANING)
+            cleaned = generateAlt(id, transcript.text, DictationMode.CLEANED, AltKind.CLEANED, settings)
         }
+
+        val strongSettings = settings.withLlmSelection(
+            rec.strongProviderOverride ?: settings.strongProvider,
+            rec.strongModelOverride ?: settings.strongModel,
+        )
+        if (wantDraft) {
+            recordings.setStatus(id, RecordingStatus.DRAFTING)
+            if (AppState.state.value.activeRecordingId == id) AppState.setPipeline(PipelineState.DRAFTING)
+            drafted = generateAlt(id, transcript.text, DictationMode.REFORMATTED, AltKind.DRAFTED, strongSettings)
+        }
+        if (wantMeeting) {
+            recordings.setStatus(id, RecordingStatus.MEETING_NOTES)
+            if (AppState.state.value.activeRecordingId == id) AppState.setPipeline(PipelineState.MEETING_NOTES)
+            meeting = try {
+                val llm = container.providerFactory.llm(strongSettings)
+                val text = llm.complete(
+                    Prompts.MEETING_NOTES_SYSTEM,
+                    "<transcript>${transcript.text}</transcript>",
+                    0.2f,
+                ).trim()
+                recordings.setAlt(id, AltKind.MEETING_NOTES, text, llm.name, true, null)
+                text
+            } catch (e: MissingKeyException) {
+                AppState.toast("Meeting notes skipped - ${e.providerLabel} key missing")
+                null
+            }
+        }
+
+        val fallbackTitle = transcript.text.lineSequence().firstOrNull(String::isNotBlank)
+            ?.trim()?.take(72).orEmpty().ifBlank { "Recording" }
+        val title = try {
+            val titleSettings = settings.withLlmSelection(settings.titleProvider, settings.titleModel)
+            container.providerFactory.llm(titleSettings).complete(
+                Prompts.TITLE_SYSTEM,
+                "<transcript>${transcript.text.take(4_000)}</transcript>",
+                0.1f,
+            ).trim().trim('"').trimEnd('.', '!', '?').take(80).ifBlank { fallbackTitle }
+        } catch (_: Exception) {
+            fallbackTitle
+        }
+        recordings.setTitle(id, title)
+
+        val finalText = meeting ?: drafted ?: cleaned ?: transcript.text
 
         // ── Deliver ──────────────────────────────────────────────────────────
         // RC-1.3: if this delivery is the tail of a BACKGROUND retry (the fox
@@ -203,6 +240,22 @@ class TranscribeWorker(
             scheduleIdleReset()
         }
         return Result.success()
+    }
+
+    private suspend fun generateAlt(
+        id: String,
+        raw: String,
+        mode: DictationMode,
+        kind: AltKind,
+        settings: com.wisprfox.android.settings.AppSettings,
+    ): String? = try {
+        val llm = container.providerFactory.llm(settings)
+        val result = CleanupOrchestrator().clean(raw, mode, null, null, llm)
+        container.recordings.setAlt(id, kind, result.text, llm.name, result.usedLlm, result.note)
+        result.text
+    } catch (e: MissingKeyException) {
+        AppState.toast("${kind.name.lowercase().replace('_', ' ')} skipped - ${e.providerLabel} key missing")
+        null
     }
 
     /** After a brief success/error dwell, return the avatar to idle (so it
@@ -293,7 +346,15 @@ class TranscribeWorker(
 
         /** Enqueue a durable transcription job for a finished recording. */
         fun enqueue(context: Context, recordingId: String) {
-            val request = OneTimeWorkRequestBuilder<TranscribeWorker>()
+            val request = request(recordingId)
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                "$UNIQUE_PREFIX$recordingId",
+                androidx.work.ExistingWorkPolicy.KEEP,
+                request,
+            )
+        }
+
+        internal fun request(recordingId: String) = OneTimeWorkRequestBuilder<TranscribeWorker>()
                 .setInputData(workDataOf(KEY_RECORDING_ID to recordingId))
                 .setConstraints(
                     Constraints.Builder()
@@ -303,11 +364,5 @@ class TranscribeWorker(
                 // 5s → 30s → ~2m → ~10m-ish ladder (clamped by WorkManager).
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 5, TimeUnit.SECONDS)
                 .build()
-            WorkManager.getInstance(context).enqueueUniqueWork(
-                "$UNIQUE_PREFIX$recordingId",
-                androidx.work.ExistingWorkPolicy.KEEP,
-                request,
-            )
-        }
     }
 }
