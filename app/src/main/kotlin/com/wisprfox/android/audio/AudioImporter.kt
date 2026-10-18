@@ -77,6 +77,14 @@ object AudioImporter {
             inputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT) else 1
         var pcmEncoding = ENCODING_PCM_16BIT
         var framesWritten = 0L
+        // We downsample to 16 kHz (Whisper's native rate) on the way out so a
+        // 44.1/48 kHz phone recording isn't uploaded at 2-3x the bytes it needs
+        // — which keeps long clips under fewer WavChunker splits and so fewer
+        // billed STT requests. Never upsample a already-low source. The output
+        // rate and resampler are fixed once the first decoded buffer tells us
+        // the true decoder rate (INFO_OUTPUT_FORMAT_CHANGED has fired by then).
+        var effectiveRate = AudioResampler.targetRateFor(outSampleRate)
+        var resampler: AudioResampler? = null
 
         try {
             codec.start()
@@ -115,11 +123,16 @@ object AudioImporter {
                             if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) sawOutputEos = true
                             if (info.size > 0) {
                                 if (writer == null) {
-                                    writer = WavWriter(outFile, outSampleRate, channels = 1, bitsPerSample = 16)
+                                    effectiveRate = AudioResampler.targetRateFor(outSampleRate)
+                                    resampler = AudioResampler(outSampleRate, effectiveRate)
+                                    writer = WavWriter(outFile, effectiveRate, channels = 1, bitsPerSample = 16)
                                 }
                                 val mono = readMono(codec, outIndex, info, outChannels, pcmEncoding)
-                                writer.write(mono, 0, mono.size)
-                                framesWritten += mono.size
+                                val resampled = resampler!!.resample(mono, mono.size)
+                                if (resampled.isNotEmpty()) {
+                                    writer.write(resampled, 0, resampled.size)
+                                    framesWritten += resampled.size
+                                }
                             }
                             codec.releaseOutputBuffer(outIndex, false)
                         }
@@ -143,9 +156,9 @@ object AudioImporter {
         }
 
         val durationMs = if (declaredDurationUs > 0) declaredDurationUs / 1000
-        else framesWritten * 1000 / outSampleRate.coerceAtLeast(1)
-        Log.i(TAG, "decoded import → ${outFile.name} rate=$outSampleRate frames=$framesWritten (~${durationMs}ms)")
-        return Result(durationMs = durationMs, sampleRate = outSampleRate)
+        else framesWritten * 1000 / effectiveRate.coerceAtLeast(1)
+        Log.i(TAG, "decoded import → ${outFile.name} rate=$effectiveRate (src=$outSampleRate) frames=$framesWritten (~${durationMs}ms)")
+        return Result(durationMs = durationMs, sampleRate = effectiveRate)
     }
 
     /** Read one decoded output buffer as a mono 16-bit ShortArray. */

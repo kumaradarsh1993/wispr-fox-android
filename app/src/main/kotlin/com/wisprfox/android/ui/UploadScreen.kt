@@ -70,17 +70,30 @@ fun UploadScreen(onOpenSettings: () -> Unit, onSelectTab: (NavTab) -> Unit) {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         container.importController.stageSharedUris(uris)
     }
-    val missingKeys = buildList {
-        container.providerKeys.stt(config.sttProvider).takeUnless { it.ready }?.let {
+    // "My defaults" — a fresh config straight from settings, independent of any
+    // chip tweaks below, so the one-tap path always means exactly the user's
+    // saved transcription + cleanup picks (cleaned transcript on by default).
+    fun defaultConfig() = ImportConfig(
+        sttProvider = settings.sttProvider,
+        sttModel = settings.sttModel,
+        mode = DictationMode.CLEANED,
+        llmProvider = settings.llmProvider,
+        llmModel = settings.activeLlmModel,
+        strongProvider = settings.strongProvider,
+        strongModel = settings.strongModel,
+    )
+    fun missingFor(cfg: ImportConfig): List<String> = buildList {
+        container.providerKeys.stt(cfg.sttProvider).takeUnless { it.ready }?.let {
             add("${it.providerLabel} key for transcription")
         }
-        if (config.generateCleaned) container.providerKeys.llm(config.llmProvider).takeUnless { it.ready }?.let {
+        if (cfg.generateCleaned) container.providerKeys.llm(cfg.llmProvider).takeUnless { it.ready }?.let {
             add("${it.providerLabel} key for cleanup")
         }
-        if (config.generateDraft || config.generateMeetingNotes) container.providerKeys.llm(config.strongProvider).takeUnless { it.ready }?.let {
+        if (cfg.generateDraft || cfg.generateMeetingNotes) container.providerKeys.llm(cfg.strongProvider).takeUnless { it.ready }?.let {
             add("${it.providerLabel} key for Draft/Meeting")
         }
     }.distinct()
+    val missingKeys = missingFor(config)
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("Upload recordings") }) },
@@ -133,6 +146,38 @@ fun UploadScreen(onOpenSettings: () -> Unit, onSelectTab: (NavTab) -> Unit) {
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+            }
+
+            if (staged.isNotEmpty()) {
+                val quickConfig = defaultConfig()
+                val quickMissing = missingFor(quickConfig)
+                SectionCard("Quick transcribe") {
+                    Text(
+                        "One tap, your defaults: ${ProviderCatalog.shortModel(quickConfig.sttModel)} transcription into a cleaned transcript (${ProviderCatalog.shortModel(quickConfig.llmModel)}). Runs in the background — leave the app and you'll get a notification with the text on your clipboard.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Button(
+                        onClick = { container.importController.processStaged(quickConfig); onSelectTab(NavTab.HISTORY) },
+                        enabled = quickMissing.isEmpty(),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(if (staged.size == 1) "Quick transcribe" else "Quick transcribe ${staged.size} files")
+                    }
+                    if (quickMissing.isNotEmpty()) {
+                        Text(
+                            "Add ${quickMissing.joinToString()} first, or set it in the options below.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    } else {
+                        Text(
+                            "Need different models, speaker labels, or a merge? Use the options below.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
 
