@@ -1,6 +1,6 @@
-# wispr-fox for Android — v2.2.0-nightly.3
+# wispr-fox for Android — v2.2.0-nightly.4
 
-`versionName = "2.2.0-nightly.3"` · `versionCode = 20` · channel: nightly
+`versionName = "2.2.0-nightly.4"` · `versionCode = 21` · channel: nightly
 
 A reliability + currency nightly, built on nightly.2. Still a nightly: install
 and test on the S23 Ultra before it is promoted to stable.
@@ -45,8 +45,13 @@ quicker to start.
 
 - OpenAI cleanup models are now the **GPT-5.6** family (Terra / Sol / Luna);
   the retired 5.4/5.5 ids self-heal to the new default on load.
-- Groq adds **Qwen 3.8 27B**; Gemini adds **3.8 Flash** (new default) and
-  **3.7 Flash**.
+- **Groq's default cleanup model is now GPT-OSS 20B.** The old default, Llama
+  3.3 70B, was shut down for free-tier accounts on 16 August 2026, so cleanup
+  out of the box was failing.
+- **Qwen 3.6 27B is replaced by Qwen 3.8 27B.** Groq shut 3.6 down on
+  14 September 2026; a saved 3.6 pick switches to 3.8 automatically.
+- **Gemini's default is now 3.8 Flash.** Gemini 3.7 Flash and 3.5 Flash are not
+  offered: Google deprecated both and silently routes them to newer models.
 - **Groq reasoning fix.** Every Groq model offered today is a reasoning model.
   Cleanup/Draft/Meeting now lift the completion budget to 16k, hide the model's
   chain-of-thought (so it is neither pasted into your text nor billed), tolerate

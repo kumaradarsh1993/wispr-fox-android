@@ -1,6 +1,6 @@
 # HANDOVER - wispr-fox-android
 
-> Last update: 2026-10-19. Current stable: **v2.1.0** (accounts + cross-device sync, UI redesign/dark theme, ownership-scoped delete + Purge). The current candidate is **v2.2.0-nightly.3** (`versionName = "2.2.0-nightly.3"`, `versionCode = 20`): nightly.2 plus the Supabase DNS-over-HTTPS fix, 16 kHz import downsample + one-tap Quick transcribe, and a desktop model-catalog refresh (GPT-5.6 family, Qwen 3.8, Gemini 3.8 default, Groq reasoning handling). It supersedes nightly.2. **Do not promote it to stable until S23 Ultra device QA passes.** The older delete/purge PostgREST paths also remain runtime-unverified.
+> Last update: 2026-10-19. Current stable: **v2.1.0** (accounts + cross-device sync, UI redesign/dark theme, ownership-scoped delete + Purge). The current candidate is **v2.2.0-nightly.4** (`versionName = "2.2.0-nightly.4"`, `versionCode = 21`): nightly.2 plus the Supabase DNS-over-HTTPS fix, 16 kHz import downsample + one-tap Quick transcribe, and a desktop model-catalog refresh (GPT-5.6 family, Qwen 3.8 replacing the retired 3.6, Gemini 3.8 default with retired 3.7/3.5 Flash removed, Groq reasoning handling). It supersedes nightly.2. **Do not promote it to stable until S23 Ultra device QA passes.** The older delete/purge PostgREST paths also remain runtime-unverified.
 
 This file is the current state-of-the-world for Android. `CLAUDE.md` is useful historical context, but this handover wins when they disagree. The full audit + rationale behind the v1.3.0 batch lives in `docs/AUDIT_2026-07-06_FABLE.md` — read it before touching overlay/delivery/pipeline code. The 2026-07-17 UX/UI audit that drove the v2.1.0 redesign is `docs/AUDIT_2026-07-17_ANDROID.md`.
 
@@ -14,10 +14,10 @@ wispr-fox is three clients sharing one Supabase backend. Keep this block in sync
 
 Shared backend spec: `../wispr-fox-web/docs/SYNC_DESIGN.md` · one-time account/backend setup: `../wispr-fox-web/SETUP_ACCOUNTS.md` (secrets in the gitignored `../wispr-fox-web/SECRETS.local.md`).
 
-## v2.2.0-nightly.3 — DNS fix, lighter imports, catalog refresh (2026-10-19)
+## v2.2.0-nightly.4 — DNS fix, lighter imports, catalog refresh (2026-10-19)
 
-Built on nightly.2. `versionCode = 20`. User-facing notes:
-`docs/RELEASE_NOTES_v2.2.0-nightly.3.md`. **CI-built APK only — no local build
+Built on nightly.2. `versionCode = 21`. User-facing notes:
+`docs/RELEASE_NOTES_v2.2.0-nightly.4.md`. **CI-built APK only — no local build
 (no JDK/Android SDK on the authoring machine), so no tag was pushed; `main` was
 pushed to the `android-nightly3` branch for CI to build and for review.**
 

@@ -73,13 +73,16 @@ object SupabaseDns {
                 .build()
         }.getOrNull()
 
-        return Dns { hostname ->
-            if (!hostname.endsWith(SUPABASE_SUFFIX)) {
-                return@Dns Dns.SYSTEM.lookup(hostname)
+        // OkHttp 4's Dns is a plain (non-fun) Kotlin interface, so no SAM lambda.
+        return object : Dns {
+            override fun lookup(hostname: String): List<InetAddress> {
+                if (!hostname.endsWith(SUPABASE_SUFFIX)) {
+                    return Dns.SYSTEM.lookup(hostname)
+                }
+                return resolveViaDoh(cloudflare, hostname)
+                    ?: resolveViaDoh(google, hostname)
+                    ?: Dns.SYSTEM.lookup(hostname)
             }
-            resolveViaDoh(cloudflare, hostname)
-                ?: resolveViaDoh(google, hostname)
-                ?: Dns.SYSTEM.lookup(hostname)
         }
     }
 
