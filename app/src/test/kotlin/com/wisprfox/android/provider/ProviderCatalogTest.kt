@@ -65,7 +65,9 @@ class ProviderCatalogTest {
 
     @Test fun currentCatalogAdditionsPresent() {
         assertTrue(ProviderCatalog.llmModelsFor(ProviderCatalog.LLM_GROQ).any { it.id == "openai/gpt-oss-120b" })
-        assertTrue(ProviderCatalog.llmModelsFor(ProviderCatalog.LLM_GROQ).any { it.id == "qwen/qwen3.6-27b" })
+        assertFalse(ProviderCatalog.llmModelsFor(ProviderCatalog.LLM_GROQ).any { it.id == "qwen/qwen3.6-27b" })
+        assertEquals("qwen/qwen3.8-27b", ProviderCatalog.sanitizeLlmModel(ProviderCatalog.LLM_GROQ, "qwen/qwen3.6-27b"))
+        assertFalse(ProviderCatalog.llmModelsFor(ProviderCatalog.LLM_GEMINI).any { it.id == "gemini-3.7-flash" || it.id == "gemini-3.5-flash" })
         assertTrue(ProviderCatalog.llmModelsFor(ProviderCatalog.LLM_GROQ).any { it.id == "qwen/qwen3.8-27b" })
         assertTrue(ProviderCatalog.llmModelsFor(ProviderCatalog.LLM_OPENAI).any { it.id == "gpt-5.6-terra" })
         assertTrue(ProviderCatalog.llmModelsFor(ProviderCatalog.LLM_GEMINI).any { it.id == "gemini-3.8-flash" })

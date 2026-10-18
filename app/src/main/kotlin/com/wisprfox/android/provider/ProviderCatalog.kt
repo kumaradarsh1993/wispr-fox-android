@@ -62,8 +62,7 @@ object ProviderCatalog {
         LLM_GROQ to listOf(
             ModelOption("openai/gpt-oss-20b", "GPT-OSS 20B", "Fast cleanup and titles"),
             ModelOption("openai/gpt-oss-120b", "GPT-OSS 120B", "Stronger drafts and meeting notes"),
-            ModelOption("qwen/qwen3.6-27b", "Qwen 3.6 27B", "Multilingual alternative (preview)"),
-            ModelOption("qwen/qwen3.8-27b", "Qwen 3.8 27B", "Newest Qwen (preview)"),
+            ModelOption("qwen/qwen3.8-27b", "Qwen 3.8 27B", "Multilingual alternative (preview)"),
         ),
         LLM_OPENAI to listOf(
             ModelOption("gpt-5.6-terra", "GPT-5.6 Terra", "Fast OpenAI cleanup default"),
@@ -72,9 +71,7 @@ object ProviderCatalog {
         ),
         LLM_GEMINI to listOf(
             ModelOption("gemini-3.8-flash", "Gemini 3.8 Flash", "Latest stable Flash"),
-            ModelOption("gemini-3.7-flash", "Gemini 3.7 Flash", "Previous stable Flash"),
-            ModelOption("gemini-3.6-flash", "Gemini 3.6 Flash", "Stable balance model"),
-            ModelOption("gemini-3.5-flash", "Gemini 3.5 Flash", "Stable balance fallback"),
+            ModelOption("gemini-3.6-flash", "Gemini 3.6 Flash", "Previous stable Flash"),
             ModelOption("gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite", "Fast current stable model"),
             ModelOption("gemini-3.1-flash-lite", "Gemini 3.1 Flash-Lite", "Stable low-cost fallback"),
             ModelOption("gemini-2.5-flash", "Gemini 2.5 Flash", "Fast free-tier option"),
@@ -126,6 +123,8 @@ object ProviderCatalog {
     fun sanitizeLlmModel(provider: String, model: String): String {
         val options = llmModelsFor(provider)
         if (provider == LLM_GEMINI && model in deprecatedGeminiModels) return options.first().id
+        // Groq shut qwen3.6-27b down on 2026-09-14; 3.8 is its direct successor.
+        if (provider == LLM_GROQ && model == "qwen/qwen3.6-27b") return "qwen/qwen3.8-27b"
         return options.firstOrNull { it.id == model }?.id ?: options.first().id
     }
 
