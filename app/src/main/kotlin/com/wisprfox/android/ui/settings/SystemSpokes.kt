@@ -352,6 +352,7 @@ private fun PurgeSection(syncEngine: com.wisprfox.android.sync.SyncEngine) {
 @Composable
 fun AboutSpoke(onBack: () -> Unit, onReplayOnboarding: () -> Unit) {
     val ctx = LocalContext.current
+    val container = remember { WisprFoxApp.container(ctx) }
     val scope = rememberCoroutineScope()
     var checking by remember { mutableStateOf(false) }
     var releases by remember { mutableStateOf<ReleaseSnapshot?>(null) }
@@ -385,7 +386,7 @@ fun AboutSpoke(onBack: () -> Unit, onReplayOnboarding: () -> Unit) {
                 onClick = {
                     checking = true; updateError = null
                     scope.launch {
-                        runCatching { fetchReleases() }
+                        runCatching { fetchReleases(container.http) }
                             .onSuccess { releases = it }
                             .onFailure { updateError = "Couldn't check right now. You can still open Releases." }
                         checking = false
@@ -426,12 +427,12 @@ private data class ReleaseSnapshot(
     val nightlyNewer: Boolean,
 )
 
-private suspend fun fetchReleases(): ReleaseSnapshot = withContext(Dispatchers.IO) {
+private suspend fun fetchReleases(httpClient: okhttp3.OkHttpClient): ReleaseSnapshot = withContext(Dispatchers.IO) {
     val request = okhttp3.Request.Builder()
         .url("https://api.github.com/repos/kumaradarsh1993/wispr-fox-android/releases?per_page=20")
         .header("Accept", "application/vnd.github+json")
         .build()
-    okhttp3.OkHttpClient().newCall(request).execute().use { response ->
+    httpClient.newCall(request).execute().use { response ->
         if (!response.isSuccessful) error("HTTP ${response.code}")
         val rows = Json.parseToJsonElement(response.body?.string().orEmpty()).jsonArray
         val stable = rows.firstOrNull { it.jsonObject["prerelease"]?.jsonPrimitive?.content == "false" }

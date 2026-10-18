@@ -12,6 +12,7 @@ import com.wisprfox.android.settings.AppSettings
 import com.wisprfox.android.settings.SecureKeyStore
 import com.wisprfox.android.settings.SettingsStore
 import com.wisprfox.android.sync.AuthManager
+import com.wisprfox.android.sync.SupabaseDns
 import com.wisprfox.android.sync.SyncEngine
 import com.wisprfox.android.sync.SyncWorker
 import kotlinx.coroutines.CoroutineScope
@@ -58,7 +59,19 @@ class AppContainer(context: Context) {
         )
     }
 
-    val http: OkHttpClient by lazy { OkHttpClient.Builder().build() }
+    val http: OkHttpClient by lazy {
+        // Supabase DNS-block fix: route `*.supabase.co` through DNS-over-HTTPS
+        // (Indian ISPs sinkhole those names → TLS EOF). The bootstrap client
+        // carries the DoH lookups and MUST use the system resolver (it would
+        // recurse otherwise); it never resolves anything but the DoH IPs. Every
+        // auth/sync/provider client is built with `http.newBuilder()`, which
+        // copies this `dns`, so the whole app inherits the fix from here. Non-
+        // Supabase hosts fall straight through to the system resolver.
+        val bootstrap = OkHttpClient.Builder().build()
+        OkHttpClient.Builder()
+            .dns(SupabaseDns.create(bootstrap))
+            .build()
+    }
     val secrets: SecureKeyStore by lazy { SecureKeyStore(app) }
     val settingsStore: SettingsStore by lazy { SettingsStore(app) }
     val database: AppDatabase by lazy { AppDatabase.get(app) }
