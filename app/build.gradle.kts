@@ -25,8 +25,8 @@ android {
         applicationId = "com.wisprfox.android"
         minSdk = 31
         targetSdk = 35
-        versionCode = 19
-        versionName = "2.2.0-nightly.2"
+        versionCode = 20
+        versionName = "2.2.0-nightly.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -39,7 +39,7 @@ android {
         // ship in release (useless without the passphrase). Empty when absent.
         buildConfigField("String", "FAMILY_BLOB", "\"${devKey("familyBlob")}\"")
         buildConfigField("String", "RELEASE_CHANNEL", "\"nightly\"")
-        buildConfigField("String", "RELEASE_TAG", "\"v2.2.0-nightly.2\"")
+        buildConfigField("String", "RELEASE_TAG", "\"v2.2.0-nightly.3\"")
     }
 
     buildTypes {
@@ -123,6 +123,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
+    implementation(libs.okhttp.dnsoverhttps)
 
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)

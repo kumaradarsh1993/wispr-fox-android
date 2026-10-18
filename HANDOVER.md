@@ -1,6 +1,6 @@
 # HANDOVER - wispr-fox-android
 
-> Last update: 2026-08-11. Current stable: **v2.1.0** (accounts + cross-device sync, UI redesign/dark theme, ownership-scoped delete + Purge). The current candidate is **v2.2.0-nightly.2** (`versionName = "2.2.0-nightly.2"`, `versionCode = 19`) with the Android meeting/share/readability revamp below. It supersedes nightly.1 after a final reliability audit. **Do not promote it to stable until S23 Ultra device QA passes.** The older delete/purge PostgREST paths also remain runtime-unverified.
+> Last update: 2026-10-19. Current stable: **v2.1.0** (accounts + cross-device sync, UI redesign/dark theme, ownership-scoped delete + Purge). The current candidate is **v2.2.0-nightly.3** (`versionName = "2.2.0-nightly.3"`, `versionCode = 20`): nightly.2 plus the Supabase DNS-over-HTTPS fix, 16 kHz import downsample + one-tap Quick transcribe, and a desktop model-catalog refresh (GPT-5.6 family, Qwen 3.8, Gemini 3.8 default, Groq reasoning handling). It supersedes nightly.2. **Do not promote it to stable until S23 Ultra device QA passes.** The older delete/purge PostgREST paths also remain runtime-unverified.
 
 This file is the current state-of-the-world for Android. `CLAUDE.md` is useful historical context, but this handover wins when they disagree. The full audit + rationale behind the v1.3.0 batch lives in `docs/AUDIT_2026-07-06_FABLE.md` — read it before touching overlay/delivery/pipeline code. The 2026-07-17 UX/UI audit that drove the v2.1.0 redesign is `docs/AUDIT_2026-07-17_ANDROID.md`.
 
@@ -13,6 +13,61 @@ wispr-fox is three clients sharing one Supabase backend. Keep this block in sync
 - **Android** — `./HANDOVER.md` (Kotlin + Jetpack Compose) ← you are here
 
 Shared backend spec: `../wispr-fox-web/docs/SYNC_DESIGN.md` · one-time account/backend setup: `../wispr-fox-web/SETUP_ACCOUNTS.md` (secrets in the gitignored `../wispr-fox-web/SECRETS.local.md`).
+
+## v2.2.0-nightly.3 — DNS fix, lighter imports, catalog refresh (2026-10-19)
+
+Built on nightly.2. `versionCode = 20`. User-facing notes:
+`docs/RELEASE_NOTES_v2.2.0-nightly.3.md`. **CI-built APK only — no local build
+(no JDK/Android SDK on the authoring machine), so no tag was pushed; `main` was
+pushed to the `android-nightly3` branch for CI to build and for review.**
+
+- **Supabase DNS-over-HTTPS (critical).** Indian ISPs DNS-poison `*.supabase.co`
+  (sinkhole IP → TLS EOF), killing sign-in/sync. New `sync/SupabaseDns.kt` builds
+  an OkHttp `Dns` that resolves only `*.supabase.co` via DoH (Cloudflare
+  `1.1.1.1` → Google `8.8.8.8`, bootstrap IPs, falling back to `Dns.SYSTEM` only
+  if both DoH providers fail); all other hosts use the system resolver unchanged.
+  Applied once on `AppContainer.http` — `AuthManager`, `SyncEngine`, and every
+  provider client are built with `http.newBuilder()`, which copies the `dns`, so
+  the whole app inherits it. `SystemSpokes.fetchReleases()` no longer news up a
+  bare `OkHttpClient()`; it uses `container.http`.
+  - **Custom Tab caveat:** `AuthManager.beginGoogleSignIn()` opens
+    `${SUPABASE_URL}/auth/v1/authorize` in a Custom Tab / system browser, which
+    resolves DNS in its OWN process — NOT through our OkHttp — so DoH does NOT
+    help the Google-button path on a tampered network. Email/password sign-in
+    and the PKCE code exchange (`completeGoogleSignIn`) DO go through our OkHttp
+    and are fixed. Documented for the user.
+- **Imports downsample to 16 kHz** (`audio/AudioResampler.kt` + test, wired into
+  `AudioImporter.decodeToWav` via `effectiveRate`). A 48 kHz source now emits
+  16 kHz mono (Whisper's native rate) — ~3x fewer bytes, so a 30-min clip is
+  ~57 MB (≈3 WavChunker splits / Groq requests) instead of ~170 MB (≈9). Never
+  upsamples a lower-rate source. The merge path's own `appendPcm` resampler now
+  mostly no-ops since segments already arrive at 16 kHz.
+- **One-tap Quick transcribe** on `UploadScreen`: a lead card runs
+  `processStaged(defaultConfig())` (saved STT + cleaned transcript) and jumps to
+  History; the full option cards stay directly below. Share path itself
+  (`MainActivity.handleShareIntent` → `ImportController.stageSharedUris` →
+  WorkManager `ImportWorker`→`TranscribeWorker`) was already durable across
+  app-kill with notification + clipboard on completion — verified, unchanged.
+- **Model catalog aligned to desktop `provider-options.ts`:** OpenAI → GPT-5.6
+  Terra/Sol/Luna (5.4/5.5 removed, self-heal to Terra); Groq +Qwen 3.8 27B;
+  Gemini default → 3.8 Flash, +3.7 Flash. Strong defaults: OpenAI gpt-5.6-sol,
+  Gemini gemini-3.8-flash.
+- **Groq reasoning handling** ported from desktop `llm/groq.rs` into
+  `GroqChatClient`: `max_completion_tokens=16384`, per-family params
+  (gpt-oss → `reasoning_effort=low` + `include_reasoning=false`; qwen →
+  `reasoning_format=hidden` + `reasoning_effort=none`), nullable `content`,
+  `stripThinkBlock`, throw `LlmError.Decode` on blank (CleanupOrchestrator then
+  falls back to raw), call timeout 8s→25s, `DEFAULT_MODEL` now `gpt-oss-20b`.
+  `TranscribeWorker` meeting-notes catch widened so a blank there can't fail the
+  whole recording.
+- Saved invalid model ids already coerce on load via `SettingsStore.toSettings`
+  sanitizers (unchanged); the removed OpenAI ids now land on the new default.
+- Tests: `ProviderCatalogTest` updated for new defaults/additions; new
+  `AudioResamplerTest`, new `GroqChatClientTest`.
+- **Verification: NOT run locally** (no toolchain). Relies on CI
+  `:app:compileDebugKotlin` + `:app:testDebugUnitTest`. New deps:
+  `com.squareup.okhttp3:okhttp-dnsoverhttps:4.12.0`.
+
 
 ## v2.2.0-nightly.2 — Android meeting/share product pass (2026-08-11)
 
