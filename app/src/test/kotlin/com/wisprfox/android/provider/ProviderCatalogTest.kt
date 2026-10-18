@@ -27,9 +27,16 @@ class ProviderCatalogTest {
 
     @Test fun deprecatedGeminiCoercesToCurrentDefault() {
         assertEquals(
-            "gemini-3.6-flash",
+            "gemini-3.8-flash",
             ProviderCatalog.sanitizeLlmModel(ProviderCatalog.LLM_GEMINI, "gemini-2.0-flash"),
         )
+    }
+
+    @Test fun staleOpenAiModelsCoerceToCurrentDefault() {
+        // gpt-5.4/5.5 removed when the catalog moved to the gpt-5.6 family;
+        // saved selections self-heal to the new default on load.
+        assertEquals("gpt-5.6-terra", ProviderCatalog.sanitizeLlmModel(ProviderCatalog.LLM_OPENAI, "gpt-5.4-mini"))
+        assertEquals("gpt-5.6-terra", ProviderCatalog.sanitizeLlmModel(ProviderCatalog.LLM_OPENAI, "gpt-5.5"))
     }
 
     @Test fun validCurrentModelsSurvive() {
@@ -44,8 +51,10 @@ class ProviderCatalogTest {
     }
 
     @Test fun currentDefaultsAreStable() {
-        assertEquals("gemini-3.6-flash", ProviderCatalog.defaultLlmModel(ProviderCatalog.LLM_GEMINI))
+        assertEquals("gemini-3.8-flash", ProviderCatalog.defaultLlmModel(ProviderCatalog.LLM_GEMINI))
+        assertEquals("gpt-5.6-terra", ProviderCatalog.defaultLlmModel(ProviderCatalog.LLM_OPENAI))
         assertEquals("openai/gpt-oss-120b", ProviderCatalog.defaultStrongLlmModel(ProviderCatalog.LLM_GROQ))
+        assertEquals("gpt-5.6-sol", ProviderCatalog.defaultStrongLlmModel(ProviderCatalog.LLM_OPENAI))
     }
 
     @Test fun removedIdsNotInLists() {
@@ -57,13 +66,18 @@ class ProviderCatalogTest {
     @Test fun currentCatalogAdditionsPresent() {
         assertTrue(ProviderCatalog.llmModelsFor(ProviderCatalog.LLM_GROQ).any { it.id == "openai/gpt-oss-120b" })
         assertTrue(ProviderCatalog.llmModelsFor(ProviderCatalog.LLM_GROQ).any { it.id == "qwen/qwen3.6-27b" })
+        assertTrue(ProviderCatalog.llmModelsFor(ProviderCatalog.LLM_GROQ).any { it.id == "qwen/qwen3.8-27b" })
+        assertTrue(ProviderCatalog.llmModelsFor(ProviderCatalog.LLM_OPENAI).any { it.id == "gpt-5.6-terra" })
+        assertTrue(ProviderCatalog.llmModelsFor(ProviderCatalog.LLM_GEMINI).any { it.id == "gemini-3.8-flash" })
         assertTrue(ProviderCatalog.llmModelsFor(ProviderCatalog.LLM_GEMINI).any { it.id == "gemini-3.6-flash" })
         assertTrue(ProviderCatalog.sttModelsFor(ProviderCatalog.STT_OPENAI).any { it.id == "gpt-4o-transcribe-diarize" })
     }
 
     @Test fun shortModelLabelsTrackCatalog() {
         assertEquals("GPT-OSS 120B", ProviderCatalog.shortModel("openai/gpt-oss-120b"))
-        assertEquals("Qwen 3.6 27B", ProviderCatalog.shortModel("qwen/qwen3.6-27b"))
+        assertEquals("Qwen 3.8 27B", ProviderCatalog.shortModel("qwen/qwen3.8-27b"))
+        assertEquals("GPT-5.6 Terra", ProviderCatalog.shortModel("gpt-5.6-terra"))
+        assertEquals("Gemini 3.8 Flash", ProviderCatalog.shortModel("gemini-3.8-flash"))
         assertEquals("Gemini 3.6 Flash", ProviderCatalog.shortModel("gemini-3.6-flash"))
         assertEquals("Gemini 3.1 Pro", ProviderCatalog.shortModel("gemini-3.1-pro-preview"))
     }

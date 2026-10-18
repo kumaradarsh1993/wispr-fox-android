@@ -62,19 +62,22 @@ object ProviderCatalog {
         LLM_GROQ to listOf(
             ModelOption("openai/gpt-oss-20b", "GPT-OSS 20B", "Fast cleanup and titles"),
             ModelOption("openai/gpt-oss-120b", "GPT-OSS 120B", "Stronger drafts and meeting notes"),
-            ModelOption("qwen/qwen3.6-27b", "Qwen 3.6 27B", "Strong multilingual alternative"),
+            ModelOption("qwen/qwen3.6-27b", "Qwen 3.6 27B", "Multilingual alternative (preview)"),
+            ModelOption("qwen/qwen3.8-27b", "Qwen 3.8 27B", "Newest Qwen (preview)"),
         ),
         LLM_OPENAI to listOf(
-            ModelOption("gpt-5.4-mini", "GPT-5.4 mini", "Fast OpenAI cleanup"),
-            ModelOption("gpt-5.4", "GPT-5.4", "Higher-quality cleanup"),
-            ModelOption("gpt-5.5", "GPT-5.5", "Frontier cleanup"),
+            ModelOption("gpt-5.6-terra", "GPT-5.6 Terra", "Fast OpenAI cleanup default"),
+            ModelOption("gpt-5.6-sol", "GPT-5.6 Sol", "Highest quality, slower/costlier"),
+            ModelOption("gpt-5.6-luna", "GPT-5.6 Luna", "Cheapest and fastest"),
         ),
         LLM_GEMINI to listOf(
-            ModelOption("gemini-3.6-flash", "Gemini 3.6 Flash", "Latest stable balance model"),
+            ModelOption("gemini-3.8-flash", "Gemini 3.8 Flash", "Latest stable Flash"),
+            ModelOption("gemini-3.7-flash", "Gemini 3.7 Flash", "Previous stable Flash"),
+            ModelOption("gemini-3.6-flash", "Gemini 3.6 Flash", "Stable balance model"),
             ModelOption("gemini-3.5-flash", "Gemini 3.5 Flash", "Stable balance fallback"),
             ModelOption("gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite", "Fast current stable model"),
             ModelOption("gemini-3.1-flash-lite", "Gemini 3.1 Flash-Lite", "Stable low-cost fallback"),
-            ModelOption("gemini-2.5-flash", "Gemini 2.5 Flash", "Fast Gemini"),
+            ModelOption("gemini-2.5-flash", "Gemini 2.5 Flash", "Fast free-tier option"),
             ModelOption("gemini-2.5-flash-lite", "Gemini Flash-Lite", "Lowest latency"),
             ModelOption("gemini-2.5-pro", "Gemini 2.5 Pro", "Paid-tier quality"),
             ModelOption("gemini-3.1-pro-preview", "Gemini 3.1 Pro", "Preview"),
@@ -93,8 +96,8 @@ object ProviderCatalog {
     /** A deliberately stronger default for Draft and Meeting Notes. */
     fun defaultStrongLlmModel(provider: String): String = when (provider) {
         LLM_GROQ -> "openai/gpt-oss-120b"
-        LLM_OPENAI -> "gpt-5.5"
-        LLM_GEMINI -> "gemini-3.6-flash"
+        LLM_OPENAI -> "gpt-5.6-sol"
+        LLM_GEMINI -> "gemini-3.8-flash"
         else -> defaultLlmModel(provider)
     }
 
@@ -143,9 +146,12 @@ object ProviderCatalog {
         model == "openai/gpt-oss-20b" -> "GPT-OSS 20B"
         model == "openai/gpt-oss-120b" -> "GPT-OSS 120B"
         model == "qwen/qwen3.6-27b" -> "Qwen 3.6 27B"
-        model.startsWith("gpt-5.4-mini") -> "GPT-5.4 mini"
-        model.startsWith("gpt-5.4") -> "GPT-5.4"
-        model.startsWith("gpt-5.5") -> "GPT-5.5"
+        model == "qwen/qwen3.8-27b" -> "Qwen 3.8 27B"
+        model.startsWith("gpt-5.6-terra") -> "GPT-5.6 Terra"
+        model.startsWith("gpt-5.6-sol") -> "GPT-5.6 Sol"
+        model.startsWith("gpt-5.6-luna") -> "GPT-5.6 Luna"
+        model.startsWith("gemini-3.8-flash") -> "Gemini 3.8 Flash"
+        model.startsWith("gemini-3.7-flash") -> "Gemini 3.7 Flash"
         model.startsWith("gemini-3.6-flash") -> "Gemini 3.6 Flash"
         model.startsWith("gemini-3.5-flash-lite") -> "Gemini 3.5 Flash-Lite"
         model.startsWith("gemini-3.5-flash") -> "Gemini 3.5 Flash"

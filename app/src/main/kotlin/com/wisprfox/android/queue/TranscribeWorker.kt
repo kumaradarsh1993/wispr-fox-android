@@ -175,6 +175,13 @@ class TranscribeWorker(
             } catch (e: MissingKeyException) {
                 AppState.toast("Meeting notes skipped - ${e.providerLabel} key missing")
                 null
+            } catch (e: Exception) {
+                // A provider decode/HTTP hiccup on the optional meeting-notes
+                // pass must not fail the whole recording (the transcript +
+                // cleaned/draft are already saved). Skip it; History keeps the
+                // other outputs.
+                AppState.toast("Meeting notes skipped - the model didn't return notes")
+                null
             }
         }
 

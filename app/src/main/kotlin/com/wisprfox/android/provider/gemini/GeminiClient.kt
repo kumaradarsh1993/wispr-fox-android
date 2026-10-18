@@ -110,6 +110,6 @@ class GeminiClient(
 
     companion object {
         const val ENDPOINT_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-        const val DEFAULT_MODEL = "gemini-2.5-flash"
+        const val DEFAULT_MODEL = "gemini-3.8-flash"
     }
 }
