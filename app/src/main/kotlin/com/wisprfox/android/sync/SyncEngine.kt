@@ -244,9 +244,25 @@ class SyncEngine(
 
     // ─── notes (transcripts) ─────────────────────────────────────────────────
 
+    /**
+     * Notes are pushed as one JSON array. PostgREST rejects a bulk insert
+     * whose objects do not all carry the same keys (HTTP 400, PGRST102 "All
+     * object keys must match") — and the shared [json] omits null fields, so
+     * any batch mixing, say, a row with a title and one without failed, every
+     * time, silently. Every dirty row then stayed stuck and phone transcripts
+     * never reached other devices. Emit nulls explicitly so every object has
+     * the same keys.
+     */
+    private val pushJson = Json { ignoreUnknownKeys = true; encodeDefaults = true; explicitNulls = true }
+
     private suspend fun pushNotes(token: String, userId: String, deviceId: String) {
         val dirty = recordings.dirtyDoneRows()
         if (dirty.isEmpty()) return
+        // Stamp the push time, not the row's local edit time (same as desktop).
+        // Other devices pull with `updated_at > cursor`; a row pushed late with
+        // an old timestamp would land below a cursor that already moved past it
+        // and never be pulled.
+        val pushedAt = SyncTime.nowIso()
         val payload = dirty.map { row ->
             RemoteNote(
                 id = row.id,
@@ -267,11 +283,11 @@ class SyncEngine(
                 stt_provider = row.sttProvider,
                 llm_provider = row.llmProvider,
                 created_at = SyncTime.toIso(row.createdAt),
-                updated_at = SyncTime.toIso(row.updatedAt),
+                updated_at = pushedAt,
                 deleted_at = null,
             )
         }
-        val body = json.encodeToString(ListSerializer(RemoteNote.serializer()), payload).toRequestBody(JSON_MEDIA)
+        val body = pushJson.encodeToString(ListSerializer(RemoteNote.serializer()), payload).toRequestBody(JSON_MEDIA)
         val request = Request.Builder()
             .url("${SupabaseConfig.SUPABASE_URL}/rest/v1/notes")
             .header("apikey", SupabaseConfig.SUPABASE_ANON_KEY)
@@ -281,7 +297,15 @@ class SyncEngine(
             .post(body)
             .build()
         client.newCall(request).execute().use { resp ->
-            if (resp.isSuccessful) recordings.clearDirty(dirty.map { it.id })
+            if (resp.isSuccessful) {
+                recordings.clearDirty(dirty.map { it.id })
+            } else {
+                // Was silent before, which is how this bug hid for months.
+                android.util.Log.w(
+                    "WisprSync",
+                    "notes push failed: HTTP ${resp.code} ${resp.body?.string()?.take(300)}",
+                )
+            }
         }
     }
 
