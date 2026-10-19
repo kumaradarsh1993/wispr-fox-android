@@ -126,5 +126,8 @@ Filename: `<YYYY-MM-DD> <title>.md` (title sanitised for filenames).
 <accuracy text, or "(not generated)">
 ```
 
-Speaker names are substituted. Sections with no content still appear with
-"(not generated)", so a reader can tell missing from empty.
+Speaker names are substituted, in the transcript and in the meeting notes.
+Headings inside the meeting notes are pushed one level down (`## Summary`
+becomes `### Summary`) so they sit under `## Meeting notes`. Sections with no
+content still appear with "(not generated)", so a reader can tell missing
+from empty.

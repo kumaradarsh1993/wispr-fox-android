@@ -73,7 +73,17 @@ object ConversationExport {
 
     fun notesText(input: Input): String =
         input.meetingNotes?.trim().orEmpty().let { notes ->
-            if (notes.isEmpty()) "" else SpeakerTurnsCodec.applyNames(notes, SpeakerTurnsCodec.encodeNames(input.names))
+            if (notes.isEmpty()) "" else demoteHeadings(
+                SpeakerTurnsCodec.applyNames(notes, SpeakerTurnsCodec.encodeNames(input.names)),
+            )
+        }
+
+    /** Contract: headings inside the notes go one level down, so "## Summary"
+     *  sits under the export's own "## Meeting notes". */
+    fun demoteHeadings(text: String): String =
+        text.lines().joinToString("\n") { line ->
+            val hashes = line.takeWhile { it == '#' }.length
+            if (hashes in 1..5 && line.getOrNull(hashes) == ' ') "#$line" else line
         }
 
     fun whisperText(input: Input): String = input.doc?.accuracy?.text?.trim().orEmpty()

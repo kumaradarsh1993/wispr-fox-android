@@ -46,7 +46,7 @@ class ConversationExportTest {
             |
             |## Meeting notes
             |
-            |## Summary
+            |### Summary
             |- Rohan confirmed Friday.
             |
             |## Speaker transcript
