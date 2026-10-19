@@ -1,6 +1,10 @@
 package com.wisprfox.android.provider.deepgram
 
+import com.wisprfox.android.provider.AudioFiles
+import com.wisprfox.android.provider.ProgressFileBody
 import com.wisprfox.android.provider.SttError
+import com.wisprfox.android.provider.SttProgress
+import com.wisprfox.android.provider.SttProgressEvent
 import com.wisprfox.android.provider.SttProvider
 import com.wisprfox.android.provider.Transcript
 import com.wisprfox.android.history.SpeakerTurn
@@ -12,10 +16,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
 import java.io.InterruptedIOException
 import java.util.concurrent.TimeUnit
@@ -53,7 +55,7 @@ class DeepgramSttClient(
     )
     @Serializable private data class Alternative(val transcript: String = "")
 
-    override suspend fun transcribe(wavPath: String, hintLang: String?, diarize: Boolean): Transcript =
+    override suspend fun transcribe(wavPath: String, hintLang: String?, diarize: Boolean, progress: SttProgress?): Transcript =
         withContext(Dispatchers.IO) {
             val src = File(wavPath)
             if (!src.exists()) throw SttError.Io("file not found: $wavPath")
@@ -69,14 +71,25 @@ class DeepgramSttClient(
                     append(hintLang)
                 }
             }
+            // Whole file in one request, never split: diarization needs the
+            // full recording so "Speaker 1" means the same person throughout.
+            val body = ProgressFileBody(src, AudioFiles.mediaType(src)) { sent, total ->
+                progress?.onEvent(
+                    if (sent >= total) SttProgressEvent.Processing(1, 1)
+                    else SttProgressEvent.Uploading(1, 1, sent, total),
+                )
+            }
             val request = Request.Builder()
                 .url(url)
                 .header("Authorization", "Token $apiKey")
-                .post(src.asRequestBody("audio/wav".toMediaType()))
+                .post(body)
+                .build()
+            val call = client.newBuilder()
+                .callTimeout(AudioFiles.callTimeoutSeconds(src.length()), TimeUnit.SECONDS)
                 .build()
 
             try {
-                client.newCall(request).execute().use { resp ->
+                call.newCall(request).execute().use { resp ->
                     val bodyStr = resp.body?.string().orEmpty()
                     if (!resp.isSuccessful) throw SttError.Http(resp.code, bodyStr)
                     val parsed = try {

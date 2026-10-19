@@ -11,9 +11,12 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.wisprfox.android.WisprFoxApp
 import com.wisprfox.android.core.AppState
+import com.wisprfox.android.core.PipelineProgress
 import com.wisprfox.android.core.PipelineState
 import com.wisprfox.android.audio.AudioImporter
-import com.wisprfox.android.audio.WavWriter
+import com.wisprfox.android.audio.AacM4aSink
+import com.wisprfox.android.audio.PcmSink
+import com.wisprfox.android.audio.WavSink
 import com.wisprfox.android.history.RecordingStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -47,29 +50,36 @@ class ImportWorker(
         if (live.activeRecordingId == null || live.pipeline in setOf(PipelineState.IDLE, PipelineState.DONE, PipelineState.ERROR)) {
             AppState.update { copy(pipeline = PipelineState.IMPORTING, activeRecordingId = id, message = "Preparing audio…", messageIsError = false) }
         }
+        PipelineProgress.report(applicationContext, id, "Preparing audio…", null, rec.isMeeting)
+        val onProgress: (Int) -> Unit = { percent ->
+            PipelineProgress.report(applicationContext, id, "Preparing audio $percent%", percent, rec.isMeeting)
+        }
 
         val outFile = File(rec.audioPath)
         val result = try {
-            decodeSource(id, uri, outFile)
+            decodeSource(id, uri, outFile, onProgress)
         } catch (e: AudioImporter.ImportException) {
             val message = e.message ?: "Couldn't import that audio file."
             recordings.setError(id, message)
             surfaceImportError(id, message)
             releaseUriPermission(uri)
+            PipelineProgress.clear(applicationContext, id)
             return@withContext Result.failure()
         } catch (e: Exception) {
             val message = "Couldn't import that audio file."
             recordings.setError(id, message)
             surfaceImportError(id, message)
             releaseUriPermission(uri)
+            PipelineProgress.clear(applicationContext, id)
             return@withContext Result.failure()
         }
 
-        // We now own a self-contained WAV; the source grant is no longer needed.
+        // We now own a self-contained audio file; the source grant is no longer needed.
         releaseUriPermission(uri)
 
         recordings.setDuration(id, result.durationMs)
         recordings.setStatus(id, RecordingStatus.TRANSCRIBING)
+        PipelineProgress.report(applicationContext, id, "Queued for upload…", null, rec.isMeeting)
         if (inputData.getBoolean(KEY_AUTO_TRANSCRIBE, true)) {
             TranscribeWorker.enqueue(applicationContext, id, importedPipeline = true)
         }
@@ -82,37 +92,48 @@ class ImportWorker(
         }
     }
 
-    /** Decode one source, or a durable app-owned manifest in the chosen order. */
-    private fun decodeSource(recordingId: String, uri: Uri, outFile: File): AudioImporter.Result {
+    /**
+     * Decode one source, or a durable app-owned manifest in the chosen order.
+     * The output format follows [outFile]'s extension: `.m4a` (AAC, what new
+     * imports use) or `.wav` (rows created before the compressed upload).
+     */
+    private fun decodeSource(recordingId: String, uri: Uri, outFile: File, onProgress: (Int) -> Unit): AudioImporter.Result {
+        val compressed = !outFile.name.endsWith(".wav", ignoreCase = true)
         val manifest = uri.takeIf { it.scheme == "file" }
             ?.path?.let(::File)
             ?.takeIf { it.name.endsWith(".wisprfox-merge.json") }
-            ?: return AudioImporter.decodeToWav(applicationContext, uri, outFile)
+            ?: return if (compressed) AudioImporter.decodeToM4a(applicationContext, uri, outFile, onProgress)
+            else AudioImporter.decodeToWav(applicationContext, uri, outFile, onProgress)
         val sources = JSONArray(manifest.readText()).let { json ->
             (0 until json.length()).map { Uri.parse(json.getString(it)) }
         }
         if (sources.isEmpty()) throw AudioImporter.ImportException("The merge list was empty.")
 
-        var writer: WavWriter? = null
+        // Merge: decode each part to a temporary WAV (raw PCM is what lets the
+        // parts be joined and resampled to one rate), then stream them into one
+        // output file.
+        var sink: PcmSink? = null
         var targetRate = 0
         var outputFrames = 0L
         try {
             sources.forEachIndexed { index, source ->
                 val decoded = File(applicationContext.cacheDir, "merge-$recordingId-$index.wav")
                 try {
-                    val result = AudioImporter.decodeToWav(applicationContext, source, decoded)
-                    if (writer == null) {
+                    val result = AudioImporter.decodeToWav(applicationContext, source, decoded) { percent ->
+                        onProgress((index * 100 + percent) / sources.size)
+                    }
+                    if (sink == null) {
                         targetRate = result.sampleRate
                         outFile.parentFile?.mkdirs()
-                        writer = WavWriter(outFile, targetRate)
+                        sink = (if (compressed) AacM4aSink(outFile) else WavSink(outFile)).also { it.start(targetRate) }
                     }
-                    outputFrames += appendPcm(decoded, result.sampleRate, targetRate, requireNotNull(writer))
+                    outputFrames += appendPcm(decoded, result.sampleRate, targetRate, requireNotNull(sink))
                 } finally {
                     runCatching { decoded.delete() }
                 }
             }
         } finally {
-            runCatching { writer?.close() }
+            runCatching { sink?.close() }
             // Clean every staged source even when one middle segment fails.
             sources.forEach(::releaseUriPermission)
             runCatching { manifest.delete() }
@@ -125,7 +146,7 @@ class ImportWorker(
     }
 
     /** Append canonical mono PCM WAV, cheaply resampling unlike source rates. */
-    private fun appendPcm(source: File, sourceRate: Int, targetRate: Int, writer: WavWriter): Long {
+    private fun appendPcm(source: File, sourceRate: Int, targetRate: Int, writer: PcmSink): Long {
         var accumulator = 0L
         var written = 0L
         val output = ShortArray(4_096)

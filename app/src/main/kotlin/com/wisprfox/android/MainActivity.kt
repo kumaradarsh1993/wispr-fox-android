@@ -44,7 +44,8 @@ import com.wisprfox.android.ui.HomeScreen
 import com.wisprfox.android.ui.OnboardingScreen
 import com.wisprfox.android.ui.SettingsScreen
 import com.wisprfox.android.ui.UploadScreen
-import com.wisprfox.android.ui.UsageScreen
+import com.wisprfox.android.ui.ConversationScreen
+import com.wisprfox.android.ui.ConversationsScreen
 import com.wisprfox.android.ui.NavTab
 import android.net.Uri
 import kotlinx.coroutines.delay
@@ -92,8 +93,14 @@ class MainActivity : ComponentActivity() {
                     // recomposition / config change.
                     val deepLink = pendingDeepLink
                     LaunchedEffect(deepLink) {
-                        if (deepLink in setOf(OPEN_HISTORY, OPEN_UPLOAD) && hasKey) {
-                            nav.navigate(if (deepLink == OPEN_UPLOAD) "upload" else "history") {
+                        if (deepLink in setOf(OPEN_HISTORY, OPEN_UPLOAD, OPEN_CONVERSATIONS) && hasKey) {
+                            nav.navigate(
+                                when (deepLink) {
+                                    OPEN_UPLOAD -> "upload"
+                                    OPEN_CONVERSATIONS -> "conversations"
+                                    else -> "history"
+                                },
+                            ) {
                                 popUpTo("home") { saveState = true }
                                 launchSingleTop = true
                                 restoreState = true
@@ -162,7 +169,21 @@ class MainActivity : ComponentActivity() {
                                 onSelectTab = { tab -> navigateTab(nav, tab) },
                             )
                         }
-                        composable("usage") { UsageScreen(onSelectTab = { tab -> navigateTab(nav, tab) }) }
+                        composable("conversations") {
+                            ConversationsScreen(
+                                onOpen = { id -> nav.navigate("conversation/$id") },
+                                onSelectTab = { tab -> navigateTab(nav, tab) },
+                            )
+                        }
+                        composable(
+                            "conversation/{id}",
+                            arguments = listOf(navArgument("id") { type = NavType.StringType }),
+                        ) { entry ->
+                            ConversationScreen(
+                                recordingId = entry.arguments?.getString("id").orEmpty(),
+                                onBack = { nav.popBackStack() },
+                            )
+                        }
                         // Settings is hub-and-spoke (audit P0-3): the hub is a
                         // list of rows with current-value summaries, each opening
                         // a large-title sub-page. One route per spoke.
@@ -299,8 +320,8 @@ class MainActivity : ComponentActivity() {
         val route = when (tab) {
             NavTab.SPEAK -> "home"
             NavTab.UPLOAD -> "upload"
+            NavTab.CONVERSATIONS -> "conversations"
             NavTab.HISTORY -> "history"
-            NavTab.USAGE -> "usage"
         }
         nav.navigate(route) {
             popUpTo("home") { saveState = true }
@@ -335,6 +356,8 @@ class MainActivity : ComponentActivity() {
         /** Value for [EXTRA_OPEN] that lands on the History screen. */
         const val OPEN_HISTORY = "history"
         const val OPEN_UPLOAD = "upload"
+        /** Value for [EXTRA_OPEN] that lands on the Conversations tab. */
+        const val OPEN_CONVERSATIONS = "conversations"
         const val EXTRA_WIDGET_ACTION = "widget_action"
         const val WIDGET_SPEAK = "speak"
         const val WIDGET_UPLOAD = "upload"

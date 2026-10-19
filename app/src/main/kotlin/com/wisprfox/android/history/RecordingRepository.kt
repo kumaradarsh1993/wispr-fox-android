@@ -249,6 +249,11 @@ class RecordingRepository(
 
     suspend fun get(id: String): Recording? = dao.getById(id)?.toDomain()
 
+    fun observeConversations(): Flow<List<Recording>> =
+        dao.observeMeetings().map { list -> list.map { it.toDomain() } }
+
+    fun observe(id: String): Flow<Recording?> = dao.observeById(id).map { it?.toDomain() }
+
     suspend fun setStatus(id: String, status: RecordingStatus) {
         dao.setStatus(id, status.raw)
         // Sync/accounts: a row becomes push-worthy the moment it lands DONE

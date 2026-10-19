@@ -77,6 +77,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.wisprfox.android.WisprFoxApp
 import com.wisprfox.android.core.AltVersionGenerator
+import com.wisprfox.android.core.PipelineProgress
 import com.wisprfox.android.core.ProviderKeyReadiness
 import com.wisprfox.android.history.AltKind
 import com.wisprfox.android.history.Recording
@@ -121,7 +122,9 @@ fun HistoryScreen(
     val ctx = LocalContext.current
     val container = remember { WisprFoxApp.container(ctx) }
     val scope = rememberCoroutineScope()
-    val recordings by container.recordings.observeRecent().collectAsState(initial = emptyList())
+    val allRecordings by container.recordings.observeRecent().collectAsState(initial = emptyList())
+    // Conversations (is_meeting) live on their own tab; History is dictations and voice notes.
+    val recordings = remember(allRecordings) { allRecordings.filterNot { it.isMeeting } }
     val player = rememberAudioPlayer()
 
     // rememberSaveable: select mode and the query survive process death, which
@@ -623,12 +626,15 @@ private fun HistoryRow(
  */
 @Composable
 private fun MetaLine(rec: Recording, isError: Boolean) {
+    val progress by PipelineProgress.lines.collectAsState()
+    val live = progress[rec.id]?.text?.takeIf { rec.status != RecordingStatus.DONE && !isError }
     val parts = buildList {
         add(clockFmt.format(Date(rec.createdAt)))
         add(rec.platformLabel())
         add(rec.mode.label)
         add("${rec.durationMs / 1000}s")
-        if (rec.status != RecordingStatus.DONE) add(statusLabel(rec.status))
+        if (live != null) add(live)
+        else if (rec.status != RecordingStatus.DONE) add(statusLabel(rec.status))
         if (rec.retryCount > 0) add("↻ ${rec.retryCount}")
     }
     Text(

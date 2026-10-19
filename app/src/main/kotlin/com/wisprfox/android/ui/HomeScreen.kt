@@ -123,7 +123,9 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
     val state by AppState.state.collectAsState()
     val settings by container.settingsStore.settings.collectAsState(initial = AppSettings())
-    val recordings by container.recordings.observeRecent(limit = 4).collectAsState(initial = emptyList())
+    val recentRows by container.recordings.observeRecent(limit = 20).collectAsState(initial = emptyList())
+    // Conversations have their own tab; Home stays the fast list for dictation.
+    val recordings = remember(recentRows) { recentRows.filterNot { it.isMeeting }.take(4) }
     val recording = state.pipeline == PipelineState.RECORDING
 
     // Overlay + battery can only change out in system settings, so re-read on

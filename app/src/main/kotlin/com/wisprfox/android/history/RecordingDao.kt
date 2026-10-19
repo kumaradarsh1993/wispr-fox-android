@@ -21,6 +21,13 @@ interface RecordingDao {
     @Query("SELECT * FROM recordings ORDER BY created_at DESC, batch_order ASC LIMIT :limit")
     suspend fun listRecent(limit: Int): List<RecordingEntity>
 
+    /** Every conversation (is_meeting), newest first — the Conversations tab. */
+    @Query("SELECT * FROM recordings WHERE is_meeting = 1 ORDER BY created_at DESC, batch_order ASC")
+    fun observeMeetings(): Flow<List<RecordingEntity>>
+
+    @Query("SELECT * FROM recordings WHERE id = :id")
+    fun observeById(id: String): Flow<RecordingEntity?>
+
     @Query("UPDATE recordings SET status = :status, error = NULL WHERE id = :id")
     suspend fun setStatus(id: String, status: String)
 

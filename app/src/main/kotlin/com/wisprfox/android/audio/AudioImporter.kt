@@ -30,6 +30,7 @@ object AudioImporter {
 
     private const val TAG = "wisprfox/AudioImporter"
     private const val TIMEOUT_US = 10_000L
+    private const val PROGRESS_STEP = 2
     // Mirrors AudioFormat.ENCODING_* without depending on the framework constants
     // so the decode logic stays unit-reasoned; values are the platform's.
     private const val ENCODING_PCM_16BIT = 2
@@ -39,10 +40,29 @@ object AudioImporter {
      * Decode [uri] into [outFile] as mono 16-bit WAV. Overwrites [outFile].
      * @throws ImportException on any unrecoverable decode error.
      */
-    fun decodeToWav(context: Context, uri: Uri, outFile: File): Result {
+    fun decodeToWav(context: Context, uri: Uri, outFile: File, onProgress: ((Int) -> Unit)? = null): Result =
+        decode(context, uri, WavSink(outFile), outFile, onProgress)
+
+    /**
+     * Decode [uri] and re-encode it as mono 16 kHz AAC-LC (~32 kbps) in an .m4a,
+     * the compact upload format for imports. Overwrites [outFile].
+     */
+    fun decodeToM4a(context: Context, uri: Uri, outFile: File, onProgress: ((Int) -> Unit)? = null): Result =
+        decode(context, uri, AacM4aSink(outFile), outFile, onProgress)
+
+    /** Decode a local audio file to WAV without a Context (used to split long uploads). */
+    fun decodeFileToWav(src: File, outFile: File): Result =
+        decode(null, Uri.fromFile(src), WavSink(outFile), outFile, null)
+
+    /**
+     * Shared decode loop: extractor → decoder → mono → ≤16 kHz → [sink].
+     * [onProgress] gets 0-100 from the extractor's position against the
+     * declared duration, throttled to about every 2%.
+     */
+    private fun decode(context: Context?, uri: Uri, sink: PcmSink, outFile: File, onProgress: ((Int) -> Unit)?): Result {
         val extractor = MediaExtractor()
         try {
-            if (uri.scheme == "file") extractor.setDataSource(requireNotNull(uri.path))
+            if (uri.scheme == "file" || context == null) extractor.setDataSource(requireNotNull(uri.path))
             else extractor.setDataSource(context, uri, null)
         } catch (e: Exception) {
             throw ImportException("Couldn't open that file — it may be missing or an unsupported type.", e)
@@ -70,13 +90,14 @@ object AudioImporter {
         }
 
         outFile.parentFile?.mkdirs()
-        var writer: WavWriter? = null
+        var sinkStarted = false
         var outSampleRate = if (inputFormat.containsKey(MediaFormat.KEY_SAMPLE_RATE))
             inputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE) else 16_000
         var outChannels = if (inputFormat.containsKey(MediaFormat.KEY_CHANNEL_COUNT))
             inputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT) else 1
         var pcmEncoding = ENCODING_PCM_16BIT
         var framesWritten = 0L
+        var lastPercent = -PROGRESS_STEP
         // We downsample to 16 kHz (Whisper's native rate) on the way out so a
         // 44.1/48 kHz phone recording isn't uploaded at 2-3x the bytes it needs
         // — which keeps long clips under fewer WavChunker splits and so fewer
@@ -85,6 +106,7 @@ object AudioImporter {
         // the true decoder rate (INFO_OUTPUT_FORMAT_CHANGED has fired by then).
         var effectiveRate = AudioResampler.targetRateFor(outSampleRate)
         var resampler: AudioResampler? = null
+        var failure: Throwable? = null
 
         try {
             codec.start()
@@ -102,8 +124,16 @@ object AudioImporter {
                             codec.queueInputBuffer(inIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                             sawInputEos = true
                         } else {
-                            codec.queueInputBuffer(inIndex, 0, size, extractor.sampleTime, 0)
+                            val sampleTimeUs = extractor.sampleTime
+                            codec.queueInputBuffer(inIndex, 0, size, sampleTimeUs, 0)
                             extractor.advance()
+                            if (onProgress != null && declaredDurationUs > 0 && sampleTimeUs >= 0) {
+                                val percent = (sampleTimeUs * 100 / declaredDurationUs).toInt().coerceIn(0, 99)
+                                if (percent >= lastPercent + PROGRESS_STEP) {
+                                    lastPercent = percent
+                                    onProgress(percent)
+                                }
+                            }
                         }
                     }
                 }
@@ -122,15 +152,16 @@ object AudioImporter {
                         if (outIndex >= 0) {
                             if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) sawOutputEos = true
                             if (info.size > 0) {
-                                if (writer == null) {
+                                if (!sinkStarted) {
                                     effectiveRate = AudioResampler.targetRateFor(outSampleRate)
                                     resampler = AudioResampler(outSampleRate, effectiveRate)
-                                    writer = WavWriter(outFile, effectiveRate, channels = 1, bitsPerSample = 16)
+                                    sink.start(effectiveRate)
+                                    sinkStarted = true
                                 }
                                 val mono = readMono(codec, outIndex, info, outChannels, pcmEncoding)
                                 val resampled = resampler!!.resample(mono, mono.size)
                                 if (resampled.isNotEmpty()) {
-                                    writer.write(resampled, 0, resampled.size)
+                                    sink.write(resampled, 0, resampled.size)
                                     framesWritten += resampled.size
                                 }
                             }
@@ -140,20 +171,27 @@ object AudioImporter {
                 }
             }
         } catch (e: ImportException) {
+            failure = e
             throw e
         } catch (e: Exception) {
+            failure = e
             throw ImportException("Couldn't decode that audio file.", e)
         } finally {
             runCatching { codec.stop() }
             runCatching { codec.release() }
             runCatching { extractor.release() }
-            runCatching { writer?.close() }
+            val closed = runCatching { sink.close() }
+            if (failure == null) closed.exceptionOrNull()?.let {
+                runCatching { outFile.delete() }
+                throw ImportException("Couldn't write the converted audio.", it)
+            }
         }
 
-        if (writer == null || framesWritten == 0L) {
+        if (!sinkStarted || framesWritten == 0L) {
             runCatching { outFile.delete() }
             throw ImportException("That file didn't contain any decodable audio.")
         }
+        onProgress?.invoke(100)
 
         val durationMs = if (declaredDurationUs > 0) declaredDurationUs / 1000
         else framesWritten * 1000 / effectiveRate.coerceAtLeast(1)

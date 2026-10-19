@@ -46,9 +46,16 @@ interface SttProvider {
     val name: String
 
     /**
-     * Transcribe a WAV file. [hintLang] should normally be null so Whisper
-     * auto-detects — the user code-switches English ↔ Hindi (locked decision
-     * ported from desktop). Throws [SttError] on failure.
+     * Transcribe an audio file (WAV from the mic, or the AAC .m4a an import is
+     * encoded to). [hintLang] should normally be null so Whisper auto-detects —
+     * the user code-switches English ↔ Hindi (locked decision ported from
+     * desktop). [progress] receives upload/processing events when supplied.
+     * Throws [SttError] on failure.
      */
-    suspend fun transcribe(wavPath: String, hintLang: String?, diarize: Boolean = false): Transcript
+    suspend fun transcribe(
+        wavPath: String,
+        hintLang: String?,
+        diarize: Boolean = false,
+        progress: SttProgress? = null,
+    ): Transcript
 }

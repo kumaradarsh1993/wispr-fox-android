@@ -10,8 +10,9 @@ import java.nio.ByteOrder
  * Whisper upload limit. Ported from `wispr-fox/src-tauri/src/stt/chunk.rs`.
  *
  * Our recordings are 16 kHz mono 16-bit (≈32 KB/s), so a 20 MB chunk holds
- * ~10 minutes — most clips never split. Cuts may fall mid-word; Whisper is
- * robust to this and joining chunk texts with a single space reads cleanly.
+ * ~10 minutes — most clips never split. Each cut is moved back to the quietest
+ * 20 ms within the 4 s before the nominal boundary, so a word is rarely split
+ * across two requests. Chunk texts are joined with a single space.
  *
  * Only canonical PCM WAV (the format [com.wisprfox.android.audio.WavWriter]
  * produces) is supported: a 44-byte RIFF/WAVE/fmt /data header followed by
@@ -61,7 +62,12 @@ object WavChunker {
             var frameStart = 0L
             var index = 0
             while (frameStart < totalFrames) {
-                val framesThis = minOf(framesPerChunk, totalFrames - frameStart)
+                val remaining = totalFrames - frameStart
+                var framesThis = if (remaining <= framesPerChunkCap) remaining else framesPerChunk
+                // Cut at the quietest moment shortly before the nominal boundary,
+                // not mid-word. Only ever moves the cut earlier, so every chunk
+                // stays under the byte ceiling.
+                if (framesThis < remaining) framesThis = quietCut(raf, spec, frameStart, framesThis, bytesPerFrame)
                 val byteStart = spec.dataOffset + frameStart * bytesPerFrame
                 val byteLen = (framesThis * bytesPerFrame).toInt()
                 val pcm = ByteArray(byteLen)
@@ -77,6 +83,56 @@ object WavChunker {
             }
         }
         return out
+    }
+
+    /** How far back from a nominal cut we look for a pause. */
+    private const val SEARCH_SECONDS = 4
+
+    /**
+     * Returns the chunk length (frames from [frameStart]) that ends at the
+     * quietest 20 ms window within the last [SEARCH_SECONDS] of [nominalFrames].
+     * Falls back to [nominalFrames] for anything but 16-bit PCM.
+     */
+    private fun quietCut(raf: RandomAccessFile, spec: WavSpec, frameStart: Long, nominalFrames: Long, bytesPerFrame: Int): Long {
+        if (spec.bitsPerSample != 16) return nominalFrames
+        val searchFrames = minOf(spec.sampleRate.toLong() * SEARCH_SECONDS, nominalFrames / 4)
+        val window = (spec.sampleRate / 50).coerceAtLeast(1)
+        if (searchFrames < window * 2) return nominalFrames
+        val searchStart = frameStart + nominalFrames - searchFrames
+        val bytes = ByteArray((searchFrames * bytesPerFrame).toInt())
+        raf.seek(spec.dataOffset + searchStart * bytesPerFrame)
+        raf.readFully(bytes)
+        val bb = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        // First channel is enough to find a pause.
+        val mono = ShortArray(searchFrames.toInt()) { i -> bb.getShort(i * bytesPerFrame) }
+        val quietStart = quietestWindowStart(mono, window)
+        val cut = searchStart + quietStart + window / 2
+        return (cut - frameStart).coerceIn(1L, nominalFrames)
+    }
+
+    /**
+     * Start index of the [window]-sample stretch with the least energy, scanning
+     * in half-window steps. Ties go to the later window so chunks stay balanced.
+     */
+    internal fun quietestWindowStart(samples: ShortArray, window: Int): Int {
+        if (samples.size <= window) return 0
+        val step = (window / 2).coerceAtLeast(1)
+        var best = 0
+        var bestEnergy = Long.MAX_VALUE
+        var start = 0
+        while (start + window <= samples.size) {
+            var energy = 0L
+            for (i in start until start + window) {
+                val s = samples[i].toLong()
+                energy += s * s
+            }
+            if (energy <= bestEnergy) {
+                bestEnergy = energy
+                best = start
+            }
+            start += step
+        }
+        return best
     }
 
     /** Best-effort delete of chunk temp files (never deletes the original). */

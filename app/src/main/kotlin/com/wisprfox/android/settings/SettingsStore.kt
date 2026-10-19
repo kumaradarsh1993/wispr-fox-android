@@ -56,6 +56,8 @@ data class AppSettings(
     val deviceName: String = android.os.Build.MODEL ?: "Android phone",
     /** Epoch millis of the last successful sync, or null if never synced. */
     val lastSyncedAt: Long? = null,
+    /** Last answer to "Voice note or Conversation?" on an upload ("voice_note" / "conversation"). */
+    val lastUploadKind: String = "voice_note",
 ) {
     /** The model name to use for the currently selected LLM provider. */
     val activeLlmModel: String get() = when (llmProvider) {
@@ -100,6 +102,7 @@ class SettingsStore(private val context: Context) {
         val deviceName = stringPreferencesKey("device_name")
         val lastSyncedAt = longPreferencesKey("last_synced_at")
         val deviceId = stringPreferencesKey("device_id")
+        val uploadKind = stringPreferencesKey("upload_kind")
     }
 
     val settings: Flow<AppSettings> = context.dataStore.data.map { p -> p.toSettings() }
@@ -150,6 +153,7 @@ class SettingsStore(private val context: Context) {
             languageHint = this[Keys.languageHint]?.takeIf { it.isNotBlank() } ?: defaults.languageHint,
             deviceName = this[Keys.deviceName]?.takeIf { it.isNotBlank() } ?: defaults.deviceName,
             lastSyncedAt = this[Keys.lastSyncedAt],
+            lastUploadKind = this[Keys.uploadKind] ?: defaults.lastUploadKind,
         )
     }
 
@@ -194,6 +198,7 @@ class SettingsStore(private val context: Context) {
     suspend fun setAvatarScale(v: AvatarScale) = edit { it[Keys.avatarScale] = v.name }
     suspend fun setDeviceName(v: String) = edit { it[Keys.deviceName] = v }
     suspend fun setLastSyncedAt(v: Long) = edit { it[Keys.lastSyncedAt] = v }
+    suspend fun setUploadKind(v: String) = edit { it[Keys.uploadKind] = v }
 
     /**
      * Stable per-install id (sync/accounts, v2.0), generated once and persisted

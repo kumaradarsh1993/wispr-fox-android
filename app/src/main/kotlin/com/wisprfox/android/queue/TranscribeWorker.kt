@@ -12,7 +12,11 @@ import androidx.work.workDataOf
 import com.wisprfox.android.WisprFoxApp
 import com.wisprfox.android.core.AppState
 import com.wisprfox.android.core.MissingKeyException
+import com.wisprfox.android.core.PipelineProgress
 import com.wisprfox.android.core.PipelineState
+import com.wisprfox.android.history.ConversationPass
+import com.wisprfox.android.provider.SttProgress
+import com.wisprfox.android.provider.SttProgressEvent
 import com.wisprfox.android.delivery.DeliveryManager
 import com.wisprfox.android.history.AltKind
 import com.wisprfox.android.history.RecordingStatus
@@ -71,6 +75,7 @@ class TranscribeWorker(
             runCatching { fail(id, UNEXPECTED_FAILURE_MESSAGE) }.getOrDefault(Result.failure())
         } finally {
             releaseLiveState(id)
+            PipelineProgress.clear(applicationContext, id)
         }
     }
 
@@ -98,6 +103,13 @@ class TranscribeWorker(
     private suspend fun runPipeline(id: String): Result {
         val recordings = container.recordings
         val rec = recordings.get(id) ?: return Result.failure()
+        // A conversation (is_meeting) runs its own pass-by-pass pipeline: speakers
+        // on the whole file, an optional Whisper accuracy pass, optional notes.
+        if (rec.isMeeting) {
+            val forced = inputData.getString(KEY_PASSES)
+                ?.split(",")?.mapNotNull { ConversationPass.parse(it) }?.toSet()?.takeIf { it.isNotEmpty() }
+            return ConversationPipeline(applicationContext, container, runAttemptCount, MAX_ATTEMPTS).run(id, forced)
+        }
         // Imported files carry the models the user picked on the import sheet as
         // per-recording overrides; live dictation leaves them null and this is a
         // no-op that returns the global settings unchanged.
@@ -116,7 +128,9 @@ class TranscribeWorker(
 
         val transcript = try {
             val stt = container.providerFactory.stt(settings)
-            stt.transcribe(rec.audioPath, settings.languageHint, rec.diarizationEnabled).also {
+            val progress = if (rec.imported) voiceNoteProgress(id) else null
+            if (progress != null) PipelineProgress.report(applicationContext, id, "Uploading…")
+            stt.transcribe(rec.audioPath, settings.languageHint, rec.diarizationEnabled, progress).also {
                 recordings.setTranscript(id, it.text, stt.name)
                 if (rec.diarizationEnabled || rec.isMeeting) {
                     recordings.setStatus(id, RecordingStatus.DIARIZING)
@@ -145,6 +159,9 @@ class TranscribeWorker(
         var drafted: String? = null
         var meeting: String? = null
 
+        if (rec.imported && (wantClean || wantDraft || wantMeeting)) {
+            PipelineProgress.report(applicationContext, id, "Writing…")
+        }
         if (wantClean) {
             recordings.setStatus(id, RecordingStatus.CLEANING)
             if (AppState.state.value.activeRecordingId == id) AppState.setPipeline(PipelineState.CLEANING)
@@ -265,6 +282,23 @@ class TranscribeWorker(
         null
     }
 
+    /** Upload / part-by-part status for an imported voice note. */
+    private fun voiceNoteProgress(id: String) = SttProgress { event ->
+        when (event) {
+            is SttProgressEvent.Uploading -> PipelineProgress.report(
+                applicationContext,
+                id,
+                uploadLine(event, if (event.parts > 1) "Uploading part ${event.part} of ${event.parts}" else "Uploading"),
+                (event.sent * 100 / event.total.coerceAtLeast(1)).toInt(),
+            )
+            is SttProgressEvent.Processing -> PipelineProgress.report(
+                applicationContext,
+                id,
+                if (event.parts > 1) "Transcribing part ${event.part} of ${event.parts}" else "Transcribing…",
+            )
+        }
+    }
+
     /** After a brief success/error dwell, return the avatar to idle (so it
      *  reverts to its sitting art and can hide again with the keyboard). */
     private fun scheduleIdleReset() {
@@ -318,31 +352,10 @@ class TranscribeWorker(
         return Result.failure()
     }
 
-    private fun SttError.isTransient(): Boolean = when (this) {
-        is SttError.Network, is SttError.Timeout -> true
-        is SttError.Http -> status in 500..599 || status == 429
-        else -> false
-    }
-
-    private fun friendlySttError(e: SttError, provider: String): String {
-        val label = ProviderCatalog.label(provider)
-        return when (e) {
-            is SttError.Http -> when (e.status) {
-                401, 403 -> "$label key rejected - check Settings."
-                413 -> "Recording too large to transcribe."
-                429 -> "$label rate limit - wait a minute and retry from History."
-                in 500..599 -> "$label had a server hiccup - retry from History."
-                else -> "Transcription failed with $label (HTTP ${e.status})."
-            }
-            is SttError.FileTooLarge -> "Recording too large to transcribe."
-            is SttError.Network -> "Transcription failed with $label - check your connection."
-            is SttError.Timeout -> "Transcription took too long with $label - retry from History."
-            else -> "Transcription failed with $label."
-        }
-    }
-
     companion object {
         const val KEY_RECORDING_ID = "recording_id"
+        /** Comma-separated [ConversationPass] keys to (re)run alone; absent = the full pipeline. */
+        const val KEY_PASSES = "passes"
         private const val MAX_ATTEMPTS = 5
         private const val UNIQUE_PREFIX = "transcribe-"
 
@@ -361,9 +374,23 @@ class TranscribeWorker(
             )
         }
 
-        internal fun request(recordingId: String, importedPipeline: Boolean = false) =
+        /** Retry one or more conversation passes on their own (Retry speakers / Add Whisper / Write notes). */
+        fun enqueuePasses(context: Context, recordingId: String, passes: Set<ConversationPass>) {
+            if (passes.isEmpty()) return
+            val request = request(recordingId, passes = passes.joinToString(",") { it.key })
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                "$UNIQUE_PREFIX$recordingId",
+                androidx.work.ExistingWorkPolicy.KEEP,
+                request,
+            )
+        }
+
+        internal fun request(recordingId: String, importedPipeline: Boolean = false, passes: String? = null) =
             OneTimeWorkRequestBuilder<TranscribeWorker>()
-                .setInputData(workDataOf(KEY_RECORDING_ID to recordingId))
+                .setInputData(
+                    if (passes == null) workDataOf(KEY_RECORDING_ID to recordingId)
+                    else workDataOf(KEY_RECORDING_ID to recordingId, KEY_PASSES to passes),
+                )
                 .setConstraints(
                     Constraints.Builder()
                         .setRequiredNetworkType(NetworkType.CONNECTED)

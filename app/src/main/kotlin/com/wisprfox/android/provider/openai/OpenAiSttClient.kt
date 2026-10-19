@@ -1,18 +1,20 @@
 package com.wisprfox.android.provider.openai
 
+import com.wisprfox.android.provider.AudioFiles
+import com.wisprfox.android.provider.ProgressFileBody
 import com.wisprfox.android.provider.SttError
+import com.wisprfox.android.provider.SttProgress
+import com.wisprfox.android.provider.SttProgressEvent
+import com.wisprfox.android.provider.WhisperParts
 import com.wisprfox.android.provider.SttProvider
 import com.wisprfox.android.provider.Transcript
-import com.wisprfox.android.provider.WavChunker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
 import java.io.InterruptedIOException
 import java.util.concurrent.TimeUnit
@@ -35,34 +37,38 @@ class OpenAiSttClient(
     @Serializable
     private data class OpenAiResponse(val text: String = "")
 
-    override suspend fun transcribe(wavPath: String, hintLang: String?, diarize: Boolean): Transcript =
+    override suspend fun transcribe(wavPath: String, hintLang: String?, diarize: Boolean, progress: SttProgress?): Transcript =
         withContext(Dispatchers.IO) {
             val src = File(wavPath)
             if (!src.exists()) throw SttError.Io("file not found: $wavPath")
 
-            if (src.length() <= WavChunker.TARGET_CHUNK_BYTES) {
-                return@withContext transcribeOne(src, hintLang)
-            }
-
-            val chunks = WavChunker.splitIfNeeded(src, WavChunker.TARGET_CHUNK_BYTES)
+            val prepared = WhisperParts.prepare(src)
+            val chunks = prepared.files
             try {
                 for (c in chunks) {
                     if (c.length() > MAX_BYTES) throw SttError.FileTooLarge(c.length(), MAX_BYTES)
                 }
-                val parts = chunks.map { transcribeOne(it, hintLang).text.trim() }
+                val parts = chunks.mapIndexed { index, chunk ->
+                    transcribeOne(chunk, hintLang, index + 1, chunks.size, progress).text.trim()
+                }
                 Transcript(parts.joinToString(" "), hintLang, null)
             } finally {
-                WavChunker.cleanup(chunks, src)
+                prepared.cleanup()
             }
         }
 
-    private fun transcribeOne(wav: File, hintLang: String?): Transcript {
-        val fileBody = wav.asRequestBody("audio/wav".toMediaType())
+    private fun transcribeOne(audio: File, hintLang: String?, part: Int, parts: Int, progress: SttProgress?): Transcript {
+        val fileBody = ProgressFileBody(audio, AudioFiles.mediaType(audio)) { sent, total ->
+            progress?.onEvent(
+                if (sent >= total) SttProgressEvent.Processing(part, parts)
+                else SttProgressEvent.Uploading(part, parts, sent, total),
+            )
+        }
         val multipart = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart("model", model)
             .addFormDataPart("response_format", "json")
-            .addFormDataPart("file", wav.name, fileBody)
+            .addFormDataPart("file", audio.name, fileBody)
             .apply {
                 if (hintLang != null) addFormDataPart("language", hintLang)
             }
@@ -75,7 +81,8 @@ class OpenAiSttClient(
             .build()
 
         try {
-            client.newCall(request).execute().use { resp ->
+            client.newBuilder().callTimeout(AudioFiles.callTimeoutSeconds(audio.length()), TimeUnit.SECONDS).build()
+                .newCall(request).execute().use { resp ->
                 val bodyStr = resp.body?.string().orEmpty()
                 if (!resp.isSuccessful) throw SttError.Http(resp.code, bodyStr)
                 val parsed = try {

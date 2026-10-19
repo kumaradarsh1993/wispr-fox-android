@@ -98,11 +98,20 @@ object ProviderCatalog {
         else -> defaultLlmModel(provider)
     }
 
-    // Android currently normalises diarized output through Deepgram's utterance
-    // response. Other diarization-capable catalog entries remain selectable for
-    // ordinary STT until their response adapters preserve stable speaker ids.
+    // Android normalises diarized output from Deepgram's utterances and from
+    // ElevenLabs Scribe's word-level speaker ids. OpenAI's diarize model stays
+    // selectable for ordinary STT until its response adapter keeps speaker ids.
     fun supportsDiarization(provider: String, model: String): Boolean =
-        provider == STT_DEEPGRAM && model in setOf("nova-3", "nova-2")
+        (provider == STT_DEEPGRAM && model in setOf("nova-3", "nova-2")) ||
+            (provider == STT_ELEVENLABS && model == "scribe_v2")
+
+    /** Engines offered for a conversation's speakers pass, default first. */
+    val diarizationProviders: List<ProviderOption>
+        get() = sttProviders.filter { it.id == STT_DEEPGRAM || it.id == STT_ELEVENLABS }
+
+    /** The Whisper engine used for a conversation's accuracy pass. */
+    const val ACCURACY_PROVIDER = STT_GROQ
+    const val ACCURACY_MODEL = "whisper-large-v3"
 
     /** Android's safest long-meeting fallback; Deepgram can diarize long files. */
     fun compatibleDiarizationSelection(provider: String, model: String): Pair<String, String> =

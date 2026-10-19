@@ -47,7 +47,7 @@ class DeliveryManager(context: Context) {
      * Suspends: the retry loop uses coroutine delays. Callers already run this
      * from a coroutine (the worker's [doWork]).
      */
-    suspend fun deliver(text: String, autoPaste: Boolean, expectedPackage: String?): Channel {
+    suspend fun deliver(text: String, autoPaste: Boolean, expectedPackage: String?, conversation: Boolean = false): Channel {
         copyToClipboard(text)
 
         val decision = DeliveryDecision.decide(
@@ -65,7 +65,7 @@ class DeliveryManager(context: Context) {
 
         // Clipboard-only outcome. RC-2.4: never fail silently — if the user
         // isn't looking at our app, they have no idea the text is ready.
-        maybeNotifyClipboardOnly()
+        maybeNotifyClipboardOnly(conversation)
         return Channel.CLIPBOARD
     }
 
@@ -126,7 +126,7 @@ class DeliveryManager(context: Context) {
      * app IS foreground the in-app UI already shows the result, so we stay
      * quiet. Tapping the notification opens History.
      */
-    private fun maybeNotifyClipboardOnly() {
+    private fun maybeNotifyClipboardOnly(conversation: Boolean) {
         if (com.wisprfox.android.core.AppState.state.value.appForeground) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             appContext.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
@@ -144,14 +144,14 @@ class DeliveryManager(context: Context) {
             appContext,
             2,
             Intent(appContext, MainActivity::class.java)
-                .putExtra(MainActivity.EXTRA_OPEN, MainActivity.OPEN_HISTORY)
+                .putExtra(MainActivity.EXTRA_OPEN, if (conversation) MainActivity.OPEN_CONVERSATIONS else MainActivity.OPEN_HISTORY)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
         val notification = NotificationCompat.Builder(appContext, CHANNEL_ID)
             .setSmallIcon(com.wisprfox.android.R.drawable.fox_favicon)
-            .setContentTitle("Transcript ready — copied to clipboard")
+            .setContentTitle(if (conversation) "Conversation ready — copied to clipboard" else "Transcript ready — copied to clipboard")
             .setContentText("Tap to view · long-press paste anywhere")
             .setContentIntent(openApp)
             .setAutoCancel(true)

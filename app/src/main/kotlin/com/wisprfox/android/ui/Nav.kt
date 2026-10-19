@@ -4,7 +4,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.FileUpload
-import androidx.compose.material.icons.filled.Insights
+import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -16,8 +16,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.height
 
-/** Where the bottom bar currently is — keeps Home/History one tap apart. */
-enum class NavTab { SPEAK, UPLOAD, HISTORY, USAGE }
+/** Where the bottom bar currently is. Usage lives under Settings → Usage. */
+enum class NavTab { SPEAK, UPLOAD, CONVERSATIONS, HISTORY }
 
 /**
  * Bottom NavigationBar shared between [HomeScreen] and [HistoryScreen]. We
@@ -36,8 +36,8 @@ fun WisprBottomBar(current: NavTab, onSelect: (NavTab) -> Unit) {
         listOf(
             Triple(NavTab.SPEAK, Icons.Filled.Mic, "Speak"),
             Triple(NavTab.UPLOAD, Icons.Filled.FileUpload, "Upload"),
+            Triple(NavTab.CONVERSATIONS, Icons.Filled.Forum, "Conversations"),
             Triple(NavTab.HISTORY, Icons.Filled.History, "History"),
-            Triple(NavTab.USAGE, Icons.Filled.Insights, "Usage"),
         ).forEach { (tab, icon, label) -> NavigationBarItem(
             selected = current == tab,
             onClick = { if (current != tab) onSelect(tab) },

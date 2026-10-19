@@ -1,18 +1,20 @@
 package com.wisprfox.android.provider.groq
 
+import com.wisprfox.android.provider.AudioFiles
+import com.wisprfox.android.provider.ProgressFileBody
 import com.wisprfox.android.provider.SttError
+import com.wisprfox.android.provider.SttProgress
+import com.wisprfox.android.provider.SttProgressEvent
+import com.wisprfox.android.provider.WhisperParts
 import com.wisprfox.android.provider.SttProvider
 import com.wisprfox.android.provider.Transcript
-import com.wisprfox.android.provider.WavChunker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.Serializable
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
 import java.io.InterruptedIOException
 import java.util.concurrent.TimeUnit
@@ -50,18 +52,15 @@ class GroqWhisperClient(
         val duration: Double? = null,
     )
 
-    override suspend fun transcribe(wavPath: String, hintLang: String?, diarize: Boolean): Transcript =
+    override suspend fun transcribe(wavPath: String, hintLang: String?, diarize: Boolean, progress: SttProgress?): Transcript =
         withContext(Dispatchers.IO) {
             val src = File(wavPath)
             if (!src.exists()) throw SttError.Io("file not found: $wavPath")
 
-            // Fast path: fits in one request (the common case).
-            if (src.length() <= WavChunker.TARGET_CHUNK_BYTES) {
-                return@withContext transcribeOne(src, hintLang)
-            }
-
-            // Slow path: split, transcribe each chunk serially, concatenate.
-            val chunks = WavChunker.splitIfNeeded(src, WavChunker.TARGET_CHUNK_BYTES)
+            // Fast path: fits in one request (the common case — a 30-minute
+            // import is ~7 MB of AAC). Larger files are split at quiet points.
+            val prepared = WhisperParts.prepare(src)
+            val chunks = prepared.files
             try {
                 for (c in chunks) {
                     if (c.length() > MAX_BYTES) {
@@ -71,8 +70,8 @@ class GroqWhisperClient(
                 val parts = ArrayList<String>(chunks.size)
                 var detectedLang: String? = null
                 var totalDuration = 0.0
-                for (chunk in chunks) {
-                    val t = transcribeOne(chunk, hintLang)
+                for ((index, chunk) in chunks.withIndex()) {
+                    val t = transcribeOne(chunk, hintLang, index + 1, chunks.size, progress)
                     if (detectedLang == null) detectedLang = t.language
                     t.durationSeconds?.let { totalDuration += it }
                     parts.add(t.text.trim())
@@ -83,17 +82,22 @@ class GroqWhisperClient(
                     durationSeconds = if (totalDuration > 0.0) totalDuration else null,
                 )
             } finally {
-                WavChunker.cleanup(chunks, src)
+                prepared.cleanup()
             }
         }
 
-    private fun transcribeOne(wav: File, hintLang: String?): Transcript {
-        val fileBody = wav.asRequestBody("audio/wav".toMediaType())
+    private fun transcribeOne(audio: File, hintLang: String?, part: Int, parts: Int, progress: SttProgress?): Transcript {
+        val fileBody = ProgressFileBody(audio, AudioFiles.mediaType(audio)) { sent, total ->
+            progress?.onEvent(
+                if (sent >= total) SttProgressEvent.Processing(part, parts)
+                else SttProgressEvent.Uploading(part, parts, sent, total),
+            )
+        }
         val multipartBuilder = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart("model", model)
             .addFormDataPart("response_format", "verbose_json")
-            .addFormDataPart("file", wav.name, fileBody)
+            .addFormDataPart("file", audio.name, fileBody)
         if (hintLang != null) multipartBuilder.addFormDataPart("language", hintLang)
 
         val request = Request.Builder()
@@ -103,7 +107,8 @@ class GroqWhisperClient(
             .build()
 
         try {
-            client.newCall(request).execute().use { resp ->
+            client.newBuilder().callTimeout(AudioFiles.callTimeoutSeconds(audio.length()), TimeUnit.SECONDS).build()
+                .newCall(request).execute().use { resp ->
                 val bodyStr = resp.body?.string().orEmpty()
                 if (!resp.isSuccessful) {
                     throw SttError.Http(resp.code, bodyStr)

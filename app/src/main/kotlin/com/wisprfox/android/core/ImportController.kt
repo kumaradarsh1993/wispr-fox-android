@@ -38,7 +38,23 @@ data class ImportConfig(
         com.wisprfox.android.provider.ProviderCatalog.LLM_GROQ,
     ),
     val merge: Boolean = false,
+    /**
+     * Conversation only: also run the Whisper accuracy pass (Groq
+     * whisper-large-v3) on the same audio. Meeting notes reuse
+     * [generateMeetingNotes]; the speakers engine is [sttProvider]/[sttModel].
+     */
+    val accuracyPass: Boolean = false,
 )
+
+/** The one question every upload entry point asks first. */
+enum class UploadKind(val raw: String) {
+    VOICE_NOTE("voice_note"),
+    CONVERSATION("conversation");
+
+    companion object {
+        fun parse(raw: String?): UploadKind = entries.firstOrNull { it.raw == raw } ?: VOICE_NOTE
+    }
+}
 
 data class StagedAudio(
     val id: String,
@@ -160,7 +176,7 @@ class ImportController(
                         uri, Intent.FLAG_GRANT_READ_URI_PERMISSION,
                     )
                 }
-                val path = File(importDir(), "${UUID.randomUUID()}.wav").absolutePath
+                val path = File(importDir(), "${UUID.randomUUID()}.m4a").absolutePath
                 val id = recordings.newImportRecording(
                     audioPath = path,
                     mode = config.mode,
@@ -195,7 +211,7 @@ class ImportController(
             if (config.merge && files.size > 1) {
                 val manifest = File(appContext.filesDir, "shared-audio/$batchId.wisprfox-merge.json")
                 manifest.writeText(JSONArray(files.map { it.uri.toString() }).toString())
-                val path = File(importDir(), "${UUID.randomUUID()}.wav").absolutePath
+                val path = File(importDir(), "${UUID.randomUUID()}.m4a").absolutePath
                 val id = recordings.newImportRecording(
                     audioPath = path,
                     mode = config.outputMode(),
@@ -219,7 +235,7 @@ class ImportController(
             }
             val jobs = mutableListOf<Pair<String, String>>()
             for ((index, staged) in files.withIndex()) {
-                val path = File(importDir(), "${UUID.randomUUID()}.wav").absolutePath
+                val path = File(importDir(), "${UUID.randomUUID()}.m4a").absolutePath
                 val id = recordings.newImportRecording(
                     audioPath = path,
                     mode = config.outputMode(),
@@ -308,6 +324,7 @@ private fun ImportConfig.requestedOutputs(): String = buildList {
     if (generateCleaned) add("cleaned")
     if (generateDraft) add("drafted")
     if (generateMeetingNotes) add("meeting")
+    if (accuracyPass) add("accuracy")
 }.joinToString(",")
 
 private fun ImportConfig.outputMode(): DictationMode = when {

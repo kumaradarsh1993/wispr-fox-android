@@ -56,12 +56,12 @@ fun TranscriptionSpoke(onBack: () -> Unit) {
 
         SectionCard("Speaker labels") {
             Text(
-                "Used automatically when diarization is selected for an upload.",
+                "Used for a Conversation's speakers pass. Deepgram Nova-3 is the default; ElevenLabs Scribe v2 is the alternative.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             ProviderChips(
-                options = ProviderCatalog.sttProviders.filter { it.id == ProviderCatalog.STT_DEEPGRAM },
+                options = ProviderCatalog.diarizationProviders,
                 selected = settings.diarizationProvider,
                 onSelect = { scope.launch { container.settingsStore.setDiarizationProvider(it) } },
             )
