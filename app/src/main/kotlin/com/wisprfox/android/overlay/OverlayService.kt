@@ -105,6 +105,8 @@ class OverlayService : Service() {
                         pipeline = snap.pipeline,
                         a11yConnected = WisprFoxAccessibilityService.isConnected(),
                         keyboardVisible = snap.keyboardVisible,
+            sensitiveForeground = snap.sensitiveForeground,
+                        sensitiveForeground = snap.sensitiveForeground,
                         nowMs = SystemClock.elapsedRealtime(),
                         lastInteractionMs = snap.lastInteractionMs,
                     )
@@ -120,7 +122,7 @@ class OverlayService : Service() {
         val container = WisprFoxApp.container(this)
         serviceScope.launch {
             container.settingsStore.settings
-                .map { it.overlayBubbleEnabled }
+                .map { it.overlayBubbleEnabled && it.dictateIntoApps }
                 .distinctUntilChanged()
                 .collect { enabled ->
                     if (!enabled) stopSelf()
@@ -216,6 +218,7 @@ class OverlayService : Service() {
             pipeline = snap.pipeline,
             a11yConnected = WisprFoxAccessibilityService.isConnected(),
             keyboardVisible = snap.keyboardVisible,
+            sensitiveForeground = snap.sensitiveForeground,
             nowMs = SystemClock.elapsedRealtime(),
             lastInteractionMs = snap.lastInteractionMs,
         )

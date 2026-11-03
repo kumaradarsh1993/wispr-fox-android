@@ -45,6 +45,9 @@ data class AppSettings(
     val autoPasteEnabled: Boolean = true,
     /** Show the floating avatar overlay (needs SYSTEM_ALERT_WINDOW). */
     val overlayBubbleEnabled: Boolean = true,
+    /** Master switch for dictating into other apps (floating fox + accessibility).
+     *  Off by default: banking apps warn while an accessibility service is on. */
+    val dictateIntoApps: Boolean = false,
     val hapticsEnabled: Boolean = true,
     val avatar: Avatar = Avatar.FOX,
     /** Floating-avatar size preset (S/M/L). Applied to the overlay footprint. */
@@ -95,6 +98,7 @@ class SettingsStore(private val context: Context) {
         val retentionMaxMb = intPreferencesKey("retention_max_mb")
         val autoPaste = booleanPreferencesKey("auto_paste")
         val overlayBubble = booleanPreferencesKey("overlay_bubble")
+        val dictateIntoApps = booleanPreferencesKey("dictate_into_apps")
         val haptics = booleanPreferencesKey("haptics")
         val avatar = stringPreferencesKey("avatar")
         val avatarScale = stringPreferencesKey("avatar_scale")
@@ -147,6 +151,7 @@ class SettingsStore(private val context: Context) {
             retentionMaxMb = this[Keys.retentionMaxMb] ?: defaults.retentionMaxMb,
             autoPasteEnabled = this[Keys.autoPaste] ?: defaults.autoPasteEnabled,
             overlayBubbleEnabled = this[Keys.overlayBubble] ?: defaults.overlayBubbleEnabled,
+            dictateIntoApps = this[Keys.dictateIntoApps] ?: defaults.dictateIntoApps,
             hapticsEnabled = this[Keys.haptics] ?: defaults.hapticsEnabled,
             avatar = this[Keys.avatar]?.let { runCatching { Avatar.valueOf(it) }.getOrNull() } ?: defaults.avatar,
             avatarScale = this[Keys.avatarScale]?.let { runCatching { AvatarScale.valueOf(it) }.getOrNull() } ?: defaults.avatarScale,
@@ -193,6 +198,7 @@ class SettingsStore(private val context: Context) {
     suspend fun setRetentionMaxMb(v: Int) = edit { it[Keys.retentionMaxMb] = v }
     suspend fun setAutoPaste(v: Boolean) = edit { it[Keys.autoPaste] = v }
     suspend fun setOverlayBubble(v: Boolean) = edit { it[Keys.overlayBubble] = v }
+    suspend fun setDictateIntoApps(v: Boolean) = edit { it[Keys.dictateIntoApps] = v }
     suspend fun setHaptics(v: Boolean) = edit { it[Keys.haptics] = v }
     suspend fun setAvatar(v: Avatar) = edit { it[Keys.avatar] = v.name }
     suspend fun setAvatarScale(v: AvatarScale) = edit { it[Keys.avatarScale] = v.name }

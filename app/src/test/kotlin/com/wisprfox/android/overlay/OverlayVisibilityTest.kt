@@ -14,6 +14,24 @@ class OverlayVisibilityTest {
 
     private val now = 100_000L
 
+    @Test fun neverShowsOverBankingApps() {
+        assertTrue(OverlayVisibility.isSensitive("com.csam.icici.bank.imobile"))
+        assertTrue(OverlayVisibility.isSensitive("com.phonepe.app"))
+        assertFalse(OverlayVisibility.isSensitive("com.whatsapp"))
+        assertFalse(OverlayVisibility.isSensitive(null))
+        // Even mid-recording with the keyboard up.
+        assertFalse(
+            OverlayVisibility.shouldShow(
+                pipeline = PipelineState.RECORDING,
+                a11yConnected = true,
+                keyboardVisible = true,
+                nowMs = now,
+                lastInteractionMs = now,
+                sensitiveForeground = true,
+            ),
+        )
+    }
+
     @Test fun busyAlwaysShowsRegardlessOfA11y() {
         for (p in listOf(
             PipelineState.RECORDING,

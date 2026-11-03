@@ -139,7 +139,9 @@ fun HomeScreen(
         owner.lifecycle.addObserver(obs)
         onDispose { owner.lifecycle.removeObserver(obs) }
     }
-    val missing = remember(permTick, state.a11yConnected) { missingPermissions(ctx, state.a11yConnected) }
+    val missing = remember(permTick, state.a11yConnected, settings.dictateIntoApps) {
+        missingPermissions(ctx, state.a11yConnected, settings.dictateIntoApps)
+    }
 
     // ── Audio-file import ────────────────────────────────────────────────────
     // Defaults per the product ask: Whisper Large v3 on Groq for transcription,
@@ -237,6 +239,25 @@ fun HomeScreen(
 
             Spacer(Modifier.height(Space.xs))
 
+            DictateIntoAppsRow(
+                enabled = settings.dictateIntoApps,
+                a11yConnected = state.a11yConnected,
+                onChange = { on ->
+                    scope.launch { container.settingsStore.setDictateIntoApps(on) }
+                    if (on) {
+                        if (!state.a11yConnected) {
+                            ctx.startActivity(
+                                android.content.Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                        }
+                    } else {
+                        ctx.stopService(android.content.Intent(ctx, com.wisprfox.android.overlay.OverlayService::class.java))
+                        com.wisprfox.android.delivery.WisprFoxAccessibilityService.turnOff()
+                    }
+                },
+            )
+
             // The one setting that belongs on Home: it's per-utterance.
             ModeSegmented(
                 selected = settings.defaultMode,
@@ -271,6 +292,42 @@ fun HomeScreen(
 // platform can decode (m4a/AAC, mp3, amr, 3gp, ogg/opus, flac, wav) across
 // Samsung and iPhone recordings.
 private val IMPORT_MIME_TYPES = arrayOf("audio/*")
+
+/* ── Dictate into other apps ─────────────────────────────────────────────── */
+
+/**
+ * The master switch for the floating fox and auto-paste. Off by default:
+ * while wispr-fox's accessibility service is on, banking apps warn on launch.
+ * Turning it off stops the fox and switches the accessibility service off,
+ * exactly as if the user did it in system settings.
+ */
+@Composable
+private fun DictateIntoAppsRow(enabled: Boolean, a11yConnected: Boolean, onChange: (Boolean) -> Unit) {
+    androidx.compose.material3.Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            Modifier.padding(horizontal = Space.md, vertical = Space.sm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            androidx.compose.foundation.layout.Column(Modifier.weight(1f)) {
+                Text("Dictate into other apps", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    when {
+                        !enabled -> "Off. Banking apps won't see wispr-fox."
+                        a11yConnected -> "On. The fox appears with the keyboard."
+                        else -> "Turn on wispr-fox in Accessibility to finish."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            androidx.compose.material3.Switch(checked = enabled, onCheckedChange = onChange)
+        }
+    }
+}
 
 /* ── Engine summary ──────────────────────────────────────────────────────── */
 
@@ -473,10 +530,13 @@ private fun ImportRow(onClick: () -> Unit) {
  * Human-readable names, because they're rendered into the banner's prose now.
  * `a11yConnected` is passed in from the AppState flow rather than polled.
  */
-private fun missingPermissions(ctx: Context, a11yConnected: Boolean): List<String> {
+private fun missingPermissions(ctx: Context, a11yConnected: Boolean, dictateIntoApps: Boolean): List<String> {
     val out = mutableListOf<String>()
-    if (!Settings.canDrawOverlays(ctx)) out += "the floating fox"
-    if (!a11yConnected) out += "auto-paste"
+    // The fox and auto-paste are only needed while "Dictate into other apps" is on.
+    if (dictateIntoApps) {
+        if (!Settings.canDrawOverlays(ctx)) out += "the floating fox"
+        if (!a11yConnected) out += "auto-paste"
+    }
     val pm = ctx.getSystemService(Context.POWER_SERVICE) as? PowerManager
     if (pm?.isIgnoringBatteryOptimizations(ctx.packageName) != true) out += "the battery exemption"
     return out

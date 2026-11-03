@@ -25,6 +25,21 @@ import com.wisprfox.android.core.PipelineState
  */
 object OverlayVisibility {
 
+    /** Apps the fox never draws over. Banking and payment apps detect overlays
+     *  and warn or refuse to run. Matched by package-name prefix. */
+    val SENSITIVE_PACKAGES = listOf(
+        "com.csam.icici", "com.icicibank", "com.snapwork.hdfc", "com.hdfcbank",
+        "com.sbi.", "com.axis.mobile", "com.msf.kbank", "com.kotak",
+        "net.one97.paytm", "com.phonepe.app", "com.google.android.apps.nbu.paisa",
+        "com.dreamplug.androidapp", "in.org.npci.upiapp",
+        "com.idfcfirstbank", "com.yesbank", "com.bankofbaroda", "com.pnb.",
+    )
+
+    fun isSensitive(packageName: CharSequence?): Boolean {
+        val p = packageName?.toString() ?: return false
+        return SENSITIVE_PACKAGES.any { p.startsWith(it) }
+    }
+
     /** Grace window (ms) the fox stays visible after user interaction when a11y is off. */
     const val INTERACTION_GRACE_MS = 4_000L
 
@@ -54,7 +69,10 @@ object OverlayVisibility {
         keyboardVisible: Boolean,
         nowMs: Long,
         lastInteractionMs: Long,
+        sensitiveForeground: Boolean = false,
     ): Boolean {
+        // Banking and payment apps warn about anything drawn over them.
+        if (sensitiveForeground) return false
         if (isBusy(pipeline)) return true
         return if (a11yConnected) {
             keyboardVisible

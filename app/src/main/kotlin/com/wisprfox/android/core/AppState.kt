@@ -52,6 +52,9 @@ object AppState {
          * without hard-coupling to the service singleton.
          */
         val a11yConnected: Boolean = false,
+        /** The app in front is on the sensitive list (banking, payments): the
+         *  fox never draws over it. */
+        val sensitiveForeground: Boolean = false,
         /**
          * Monotonic (SystemClock.elapsedRealtime) timestamp of the last user
          * interaction with the floating fox. Drives the short grace window that
@@ -83,6 +86,8 @@ object AppState {
     fun setKeyboardVisible(visible: Boolean) = update { copy(keyboardVisible = visible) }
 
     fun setA11yConnected(connected: Boolean) = update { copy(a11yConnected = connected) }
+
+    fun setSensitiveForeground(sensitive: Boolean) = update { copy(sensitiveForeground = sensitive) }
 
     fun setAppForeground(foreground: Boolean) = update { copy(appForeground = foreground) }
 

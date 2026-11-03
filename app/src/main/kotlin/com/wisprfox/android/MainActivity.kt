@@ -259,7 +259,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             val container = WisprFoxApp.container(this@MainActivity)
             val settings = container.settingsStore.settings.first()
-            if (Settings.canDrawOverlays(this@MainActivity) && settings.overlayBubbleEnabled) {
+            if (Settings.canDrawOverlays(this@MainActivity) && settings.overlayBubbleEnabled && settings.dictateIntoApps) {
                 startService(Intent(this@MainActivity, OverlayService::class.java))
             } else {
                 stopService(Intent(this@MainActivity, OverlayService::class.java))

@@ -10,6 +10,7 @@ import android.view.accessibility.AccessibilityWindowInfo
 import com.wisprfox.android.WisprFoxApp
 import com.wisprfox.android.core.AppState
 import com.wisprfox.android.overlay.OverlayService
+import com.wisprfox.android.overlay.OverlayVisibility
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -59,6 +60,12 @@ class WisprFoxAccessibilityService : AccessibilityService() {
         // RC-1.2: clear any stale keyboard state left over from a previous
         // service lifetime so the fox doesn't start out wrongly pinned.
         AppState.setKeyboardVisible(false)
+        // Turning accessibility on (from our switch or from system settings)
+        // means the user wants to dictate into other apps.
+        runCatching {
+            val container = WisprFoxApp.container(this)
+            serviceScope.launch { container.settingsStore.setDictateIntoApps(true) }
+        }
         // RC-1.4: the enabled a11y service keeps our process alive and is the
         // natural companion signal, so (re)start the overlay here — this is
         // what makes the fox survive reboot / process death once a11y is on.
@@ -93,6 +100,10 @@ class WisprFoxAccessibilityService : AccessibilityService() {
      * re-check reconciles against the settled window state and self-heals.
      */
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        // The active window is the app in front, never the keyboard, so this
+        // stays right while a keyboard is open over a banking app.
+        val front = runCatching { rootInActiveWindow?.packageName }.getOrNull()
+        if (front != null) AppState.setSensitiveForeground(OverlayVisibility.isSensitive(front))
         AppState.setKeyboardVisible(isKeyboardVisible())
         scheduleDebouncedRecheck()
     }
@@ -286,6 +297,15 @@ class WisprFoxAccessibilityService : AccessibilityService() {
 
         /** Whether the service is currently connected (user enabled it). */
         fun isConnected(): Boolean = instance != null
+
+        /** Switch accessibility off for wispr-fox, as if the user did it in
+         *  system settings, so banking apps stop seeing it as on. Returns false
+         *  when the service isn't running (nothing to turn off). */
+        fun turnOff(): Boolean {
+            val svc = instance ?: return false
+            svc.disableSelf()
+            return true
+        }
 
         /**
          * Package name of the currently focused editable field, when known.
