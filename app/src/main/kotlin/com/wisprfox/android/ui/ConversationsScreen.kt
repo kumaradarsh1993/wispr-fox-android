@@ -105,7 +105,7 @@ fun ConversationsScreen(onOpen: (String) -> Unit, onSelectTab: (NavTab) -> Unit)
         topBar = {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
-                title = { Text("Conversations") },
+                title = { HistoryKindSwitch(NavTab.CONVERSATIONS, onSelectTab) },
             )
         },
         bottomBar = { WisprBottomBar(NavTab.CONVERSATIONS, onSelectTab) },

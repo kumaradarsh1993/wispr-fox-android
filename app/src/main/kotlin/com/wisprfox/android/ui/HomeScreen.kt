@@ -184,11 +184,6 @@ fun HomeScreen(
                         )
                     }
                 },
-                actions = {
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Filled.Settings, contentDescription = "Settings")
-                    }
-                },
             )
         },
         bottomBar = { WisprBottomBar(NavTab.SPEAK, onSelectTab) },
@@ -269,11 +264,8 @@ fun HomeScreen(
             // deep-links to where they're actually configured.
             EngineSummaryRow(settings = settings, onClick = onOpenModels)
 
-            // Recent gets the room the hero was wasting.
-            RecentsCard(recordings = recordings, onOpenAll = onOpenHistory)
-
-            // Clear the FAB + bottom bar.
-            Spacer(Modifier.height(Space.xxl))
+            // No Recent list (Nov 2026): Speak is one fixed screen. Past notes
+            // live on History.
         }
     }
 

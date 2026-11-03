@@ -173,13 +173,16 @@ fun HistoryScreen(
         topBar = {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
-                title = { Text(if (selectMode) "${selected.count { it.value }} selected" else "History") },
+                title = {
+                    if (selectMode) Text("${selected.count { it.value }} selected")
+                    else HistoryKindSwitch(NavTab.HISTORY, onSelectTab)
+                },
+                // History is a tab: only select mode gets a leading (cancel) icon.
                 navigationIcon = {
-                    IconButton(onClick = { if (selectMode) exitSelectMode() else onBack() }) {
-                        Icon(
-                            if (selectMode) Icons.Filled.Close else Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = if (selectMode) "Cancel" else "Back",
-                        )
+                    if (selectMode) {
+                        IconButton(onClick = { exitSelectMode() }) {
+                            Icon(Icons.Filled.Close, contentDescription = "Cancel")
+                        }
                     }
                 },
                 actions = {

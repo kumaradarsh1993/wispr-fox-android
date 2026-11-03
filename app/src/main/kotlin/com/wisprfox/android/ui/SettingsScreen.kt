@@ -62,8 +62,8 @@ import com.wisprfox.android.sync.SupabaseConfig
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    onBack: () -> Unit,
     onOpenSpoke: (SettingsSpoke) -> Unit,
+    onSelectTab: (NavTab) -> Unit,
 ) {
     val ctx = LocalContext.current
     val container = remember { WisprFoxApp.container(ctx) }
@@ -87,14 +87,11 @@ fun SettingsScreen(
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = MaterialTheme.colorScheme.background,
+        // Settings is a bottom-bar tab now, so no back arrow.
+        bottomBar = { WisprBottomBar(NavTab.SETTINGS, onSelectTab) },
         topBar = {
             LargeTopAppBar(
                 title = { Text("Settings") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
                 colors = TopAppBarDefaults.largeTopAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
                     scrolledContainerColor = MaterialTheme.colorScheme.background,

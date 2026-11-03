@@ -189,8 +189,8 @@ class MainActivity : ComponentActivity() {
                         // a large-title sub-page. One route per spoke.
                         composable("settings") {
                             SettingsScreen(
-                                onBack = { nav.popBackStack() },
                                 onOpenSpoke = { nav.navigate(it.route) },
+                                onSelectTab = { tab -> navigateTab(nav, tab) },
                             )
                         }
                         composable(SettingsSpoke.TRANSCRIPTION.route) {
@@ -322,6 +322,7 @@ class MainActivity : ComponentActivity() {
             NavTab.UPLOAD -> "upload"
             NavTab.CONVERSATIONS -> "conversations"
             NavTab.HISTORY -> "history"
+            NavTab.SETTINGS -> "settings"
         }
         nav.navigate(route) {
             popUpTo("home") { saveState = true }
