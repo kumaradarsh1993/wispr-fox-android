@@ -105,7 +105,6 @@ class OverlayService : Service() {
                         pipeline = snap.pipeline,
                         a11yConnected = WisprFoxAccessibilityService.isConnected(),
                         keyboardVisible = snap.keyboardVisible,
-            sensitiveForeground = snap.sensitiveForeground,
                         sensitiveForeground = snap.sensitiveForeground,
                         nowMs = SystemClock.elapsedRealtime(),
                         lastInteractionMs = snap.lastInteractionMs,
