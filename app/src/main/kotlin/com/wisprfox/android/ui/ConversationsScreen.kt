@@ -285,6 +285,11 @@ fun ConversationScreen(recordingId: String, onBack: () -> Unit) {
                         IconButton(onClick = { copyMenu = true }) { Icon(Icons.Filled.ContentCopy, "Copy") }
                         DropdownMenu(expanded = copyMenu, onDismissRequest = { copyMenu = false }) {
                             DropdownMenuItem(
+                                text = { Text("Both transcripts") },
+                                enabled = turns.isNotEmpty() || whisper != null,
+                                onClick = { copyMenu = false; copy("Both transcripts", ConversationExport.bothTranscripts(exportInput)) },
+                            )
+                            DropdownMenuItem(
                                 text = { Text("Notes") },
                                 enabled = !r.meetingNotesText.isNullOrBlank(),
                                 onClick = { copyMenu = false; copy("Notes", ConversationExport.notesText(exportInput)) },

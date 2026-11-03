@@ -1,6 +1,7 @@
 package com.wisprfox.android.history
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDateTime
@@ -99,5 +100,31 @@ class ConversationExportTest {
     @Test fun speakersCopyUsesNamesAndTimestamps() {
         val text = ConversationExport.speakersPlain(fullDoc.turns.take(2), mapOf("Speaker 2" to "Rohan"))
         assertEquals("[00:00] Speaker 1: Shall we start?\n\n[00:42] Rohan: Yes, the launch is Friday.", text)
+    }
+
+    private val bothInput = ConversationExport.Input(
+        title = "Launch sync",
+        createdAtMillis = created,
+        durationMs = 62_000,
+        meetingNotes = null,
+        doc = fullDoc,
+        names = mapOf("Speaker 2" to "Rohan"),
+        zone = zone,
+    )
+
+    @Test fun bothTranscriptsAreLabelledSeparatedAndNamedOnlyInTheFirst() {
+        val parts = ConversationExport.bothTranscripts(bothInput).split(ConversationExport.TRANSCRIPT_SEPARATOR)
+        assertEquals(2, parts.size)
+        assertTrue(parts[0].startsWith("Transcript with speakers labelled, by Deepgram nova-3."))
+        assertTrue(parts[0].contains("Rohan: Yes, the launch is Friday."))
+        assertTrue(parts[1].trim().startsWith("The same audio transcribed by Groq whisper-large-v3"))
+        assertTrue(parts[1].contains("Shall we start? Yes, the launch is Friday. Agreed."))
+        assertFalse(parts[1].contains("Rohan"))
+    }
+
+    @Test fun bothTranscriptsFallsBackToTheOneThatExists() {
+        val text = ConversationExport.bothTranscripts(bothInput.copy(doc = fullDoc.copy(accuracy = null)))
+        assertFalse(text.contains(ConversationExport.TRANSCRIPT_SEPARATOR))
+        assertTrue(text.startsWith("Transcript with speakers labelled"))
     }
 }

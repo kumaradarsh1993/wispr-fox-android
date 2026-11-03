@@ -88,6 +88,41 @@ object ConversationExport {
 
     fun whisperText(input: Input): String = input.doc?.accuracy?.text?.trim().orEmpty()
 
+    /** Separator between the two transcripts in [bothTranscripts]. */
+    const val TRANSCRIPT_SEPARATOR = "──────────"
+
+    /**
+     * Copy → Both transcripts (the Meeting default, Nov 2026): the speaker
+     * transcript first with a line saying what it is, then the Whisper
+     * transcript of the same audio with its own line, so an AI assistant can
+     * use one for who spoke and the other for the wording. Speaker names apply
+     * to the first part only (the Whisper part has no speakers). With only one
+     * transcript available, that one is returned on its own, still labelled.
+     */
+    fun bothTranscripts(input: Input): String {
+        val doc = input.doc
+        val turns = doc?.turns.orEmpty()
+        val speakers = speakersPlain(turns, input.names).trim()
+        val whisper = whisperText(input)
+        val speakerEngine = doc?.engine?.let { engineLabel(it.provider, it.model) } ?: "the speaker engine"
+        val wordEngine = doc?.accuracy?.let { engineLabel(it.provider, it.model) } ?: "Whisper"
+        return buildString {
+            if (speakers.isNotEmpty()) {
+                append("Transcript with speakers labelled, by ").append(speakerEngine)
+                append(". It knows who spoke but can mishear words.\n\n")
+                append(speakers)
+            }
+            if (speakers.isNotEmpty() && whisper.isNotEmpty()) {
+                append("\n\n").append(TRANSCRIPT_SEPARATOR).append("\n\n")
+            }
+            if (whisper.isNotEmpty()) {
+                append("The same audio transcribed by ").append(wordEngine)
+                append(", without speakers. Its wording is usually more accurate.\n\n")
+                append(whisper)
+            }
+        }
+    }
+
     /** Copy → Speakers: `[mm:ss] Name: text` paragraphs, names substituted. */
     fun speakersPlain(turns: List<SpeakerTurn>, names: Map<String, String>): String =
         turns.filter { it.text.isNotBlank() }.joinToString("\n\n") { turn ->

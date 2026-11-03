@@ -250,9 +250,23 @@ internal class ConversationPipeline(
         var copied = false
         if (fullRun) {
             val latest = recordings.get(id)
-            val clip = notesText?.takeIf { it.isNotBlank() }?.let { SpeakerTurnsCodec.applyNames(it, latest?.speakerNames) }
-                ?: SpeakerTurnsCodec.plainTranscript(doc.turns, SpeakerTurnsCodec.names(latest?.speakerNames)).takeIf { it.isNotBlank() }
-                ?: doc.accuracy?.text
+            // Nov 2026: copy both transcripts, labelled, so one paste into an
+            // AI assistant carries who-said-what and the better wording.
+            // Notes, when asked for, go on top.
+            val both = com.wisprfox.android.history.ConversationExport.bothTranscripts(
+                com.wisprfox.android.history.ConversationExport.Input(
+                    title = latest?.title.orEmpty(),
+                    createdAtMillis = latest?.createdAt ?: 0L,
+                    durationMs = latest?.durationMs ?: 0L,
+                    meetingNotes = null,
+                    doc = doc,
+                    names = SpeakerTurnsCodec.names(latest?.speakerNames),
+                ),
+            )
+            val notes = notesText?.takeIf { it.isNotBlank() }?.let { SpeakerTurnsCodec.applyNames(it, latest?.speakerNames) }
+            val clip = listOfNotNull(notes, both.takeIf { it.isNotBlank() })
+                .joinToString("\n\n${com.wisprfox.android.history.ConversationExport.TRANSCRIPT_SEPARATOR}\n\n")
+                .takeIf { it.isNotBlank() }
             if (!clip.isNullOrBlank()) {
                 container.delivery.deliver(clip, autoPaste = false, expectedPackage = null, conversation = true)
                 copied = true
