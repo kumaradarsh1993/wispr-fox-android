@@ -2,7 +2,7 @@
 
 Stable release of v2.3.0-nightly.1 (Conversations), unchanged.
 
-`versionName = "2.3.0-nightly.1"` · `versionCode = 24` · channel: nightly
+`versionName = "2.3.0"` · `versionCode = 25` · channel: stable
 
 **Conversations get their own tab, and long recordings stop looking stuck.**
 
