@@ -21,29 +21,32 @@ object Space {
     /** 8dp — related items inside one card; the default chip gap. */
     val sm = 8.dp
 
-    /** 12dp — icon → text in a row. */
-    val md = 12.dp
+    // Nov 2026 lean pass: the larger steps shrink so screens fit without
+    // scrolling on an S23 Ultra. The 4dp grid still holds.
 
-    /** 16dp — the workhorse. Card interiors, screen insets, list gaps. */
-    val lg = 16.dp
+    /** 10dp — icon → text in a row. */
+    val md = 10.dp
 
-    /** 24dp — between unrelated groups on the same screen. */
-    val xl = 24.dp
+    /** 12dp — the workhorse. Card interiors, list gaps. */
+    val lg = 12.dp
 
-    /** 32dp — hero breathing room; the gap above a bottom-anchored action. */
-    val xxl = 32.dp
+    /** 16dp — between unrelated groups on the same screen. */
+    val xl = 16.dp
+
+    /** 24dp — hero breathing room; the gap above a bottom-anchored action. */
+    val xxl = 24.dp
 
     /**
      * THE horizontal screen inset. Every screen. M3's default and what One UI
      * uses, so app content lines up with the system's own surfaces.
      */
-    val screen = 16.dp
+    val screen = 14.dp
 
     /** THE card interior. One value, everywhere. */
-    val card = 16.dp
+    val card = 12.dp
 
     /** Gap between sibling cards / list rows. */
-    val listGap = 8.dp
+    val listGap = 6.dp
 }
 
 /**
@@ -74,13 +77,19 @@ object Sizes {
     /** Minimum touch target. Android accessibility floor — never go below. */
     val touch = 48.dp
 
+    /** Compact icon button: 40dp target, still easy with a thumb. */
+    val iconButton = 40.dp
+
+    /** Icon inside compact buttons and action rows. */
+    val actionIcon = 18.dp
+
     /** Avatar picker cell, and the preview inside it. One size, one component. */
-    val avatarCell = 72.dp
-    val avatarPreview = 48.dp
+    val avatarCell = 64.dp
+    val avatarPreview = 42.dp
 
     /** Home hero avatar. Was 160dp in a 180dp box — ~22% of the viewport. */
-    val hero = 120.dp
+    val hero = 104.dp
 
     /** Leading icon in a settings/permission row. */
-    val rowIcon = 24.dp
+    val rowIcon = 20.dp
 }

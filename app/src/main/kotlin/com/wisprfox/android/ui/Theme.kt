@@ -205,20 +205,37 @@ private val lineHeightStyle = LineHeightStyle(
     trim = LineHeightStyle.Trim.None,
 )
 
+/**
+ * Material's default scale reads oversized on a 6.8" phone next to Samsung's
+ * own apps (Adarsh, Nov 2026: "feels bloated"). Everything is scaled to 90%,
+ * which takes body text from 16 to 14.4 sp and labels from 14 to 12.6 sp.
+ */
+private const val TYPE_SCALE = 0.9f
+
+private fun androidx.compose.ui.text.TextStyle.scaled() = copy(
+    fontSize = fontSize * TYPE_SCALE,
+    lineHeight = lineHeight * TYPE_SCALE,
+)
+
 private val FoxTypography = Typography().run {
     copy(
-        headlineLarge = headlineLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp, lineHeightStyle = lineHeightStyle),
-        headlineMedium = headlineMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp, lineHeightStyle = lineHeightStyle),
-        headlineSmall = headlineSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp, lineHeightStyle = lineHeightStyle),
-        titleLarge = titleLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.2).sp),
-        titleMedium = titleMedium.copy(fontWeight = FontWeight.SemiBold),
-        titleSmall = titleSmall.copy(fontWeight = FontWeight.SemiBold),
-        bodyLarge = bodyLarge.copy(lineHeightStyle = lineHeightStyle),
-        bodyMedium = bodyMedium.copy(lineHeightStyle = lineHeightStyle),
-        bodySmall = bodySmall.copy(lineHeightStyle = lineHeightStyle),
-        labelLarge = labelLarge.copy(fontWeight = FontWeight.SemiBold),
-        labelMedium = labelMedium.copy(fontWeight = FontWeight.Medium),
-    )
+        displayLarge = displayLarge.scaled(),
+        displayMedium = displayMedium.scaled(),
+        displaySmall = displaySmall.scaled(),
+        labelSmall = labelSmall.scaled(),
+    ).run { copy(
+        headlineLarge = headlineLarge.scaled().copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp, lineHeightStyle = lineHeightStyle),
+        headlineMedium = headlineMedium.scaled().copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.4).sp, lineHeightStyle = lineHeightStyle),
+        headlineSmall = headlineSmall.scaled().copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp, lineHeightStyle = lineHeightStyle),
+        titleLarge = titleLarge.scaled().copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.2).sp),
+        titleMedium = titleMedium.scaled().copy(fontWeight = FontWeight.SemiBold),
+        titleSmall = titleSmall.scaled().copy(fontWeight = FontWeight.SemiBold),
+        bodyLarge = bodyLarge.scaled().copy(lineHeightStyle = lineHeightStyle),
+        bodyMedium = bodyMedium.scaled().copy(lineHeightStyle = lineHeightStyle),
+        bodySmall = bodySmall.scaled().copy(lineHeightStyle = lineHeightStyle),
+        labelLarge = labelLarge.scaled().copy(fontWeight = FontWeight.SemiBold),
+        labelMedium = labelMedium.scaled().copy(fontWeight = FontWeight.Medium),
+    ) }
 }
 
 /**

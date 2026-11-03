@@ -29,7 +29,7 @@ enum class NavTab { SPEAK, UPLOAD, CONVERSATIONS, HISTORY }
 @Composable
 fun WisprBottomBar(current: NavTab, onSelect: (NavTab) -> Unit) {
     NavigationBar(
-        modifier = Modifier.height(64.dp),
+        modifier = Modifier.height(58.dp),
         containerColor = MaterialTheme.colorScheme.surface,
         tonalElevation = 0.dp,
     ) {
