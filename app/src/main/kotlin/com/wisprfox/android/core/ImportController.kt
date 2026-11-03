@@ -46,10 +46,18 @@ data class ImportConfig(
     val accuracyPass: Boolean = false,
 )
 
-/** The one question every upload entry point asks first. */
+/**
+ * The Upload presets (Nov 2026). Raw values stay as before so a saved choice
+ * survives the update: voice_note is the Transcript preset, conversation is
+ * Meeting.
+ */
 enum class UploadKind(val raw: String) {
+    /** Transcript: Whisper only, no cleanup. Long voice notes to yourself. */
     VOICE_NOTE("voice_note"),
-    CONVERSATION("conversation");
+    /** Meeting: Deepgram speakers plus a Whisper version, both kept. */
+    CONVERSATION("conversation"),
+    /** Custom: Whisper with cleanup by default; every option editable. */
+    CUSTOM("custom");
 
     companion object {
         fun parse(raw: String?): UploadKind = entries.firstOrNull { it.raw == raw } ?: VOICE_NOTE

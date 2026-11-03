@@ -55,6 +55,8 @@ object AppState {
         /** The app in front is on the sensitive list (banking, payments): the
          *  fox never draws over it. */
         val sensitiveForeground: Boolean = false,
+        /** A file was just shared in: Upload opens the two-choice sheet. */
+        val shareChoicePending: Boolean = false,
         /**
          * Monotonic (SystemClock.elapsedRealtime) timestamp of the last user
          * interaction with the floating fox. Drives the short grace window that
@@ -88,6 +90,8 @@ object AppState {
     fun setA11yConnected(connected: Boolean) = update { copy(a11yConnected = connected) }
 
     fun setSensitiveForeground(sensitive: Boolean) = update { copy(sensitiveForeground = sensitive) }
+
+    fun setShareChoicePending(pending: Boolean) = update { copy(shareChoicePending = pending) }
 
     fun setAppForeground(foreground: Boolean) = update { copy(appForeground = foreground) }
 

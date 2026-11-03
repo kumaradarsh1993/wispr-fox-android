@@ -61,6 +61,9 @@ data class AppSettings(
     val lastSyncedAt: Long? = null,
     /** Last answer to "Voice note or Conversation?" on an upload ("voice_note" / "conversation"). */
     val lastUploadKind: String = "voice_note",
+    /** Where Upload looks for your newest recordings: a MediaStore relative
+     *  path prefix. Samsung Voice Recorder saves under this one. */
+    val recordingsFolder: String = "Recordings/Voice Recorder/",
 ) {
     /** The model name to use for the currently selected LLM provider. */
     val activeLlmModel: String get() = when (llmProvider) {
@@ -107,6 +110,7 @@ class SettingsStore(private val context: Context) {
         val lastSyncedAt = longPreferencesKey("last_synced_at")
         val deviceId = stringPreferencesKey("device_id")
         val uploadKind = stringPreferencesKey("upload_kind")
+        val recordingsFolder = stringPreferencesKey("recordings_folder")
     }
 
     val settings: Flow<AppSettings> = context.dataStore.data.map { p -> p.toSettings() }
@@ -159,6 +163,7 @@ class SettingsStore(private val context: Context) {
             deviceName = this[Keys.deviceName]?.takeIf { it.isNotBlank() } ?: defaults.deviceName,
             lastSyncedAt = this[Keys.lastSyncedAt],
             lastUploadKind = this[Keys.uploadKind] ?: defaults.lastUploadKind,
+            recordingsFolder = this[Keys.recordingsFolder] ?: defaults.recordingsFolder,
         )
     }
 
@@ -205,6 +210,7 @@ class SettingsStore(private val context: Context) {
     suspend fun setDeviceName(v: String) = edit { it[Keys.deviceName] = v }
     suspend fun setLastSyncedAt(v: Long) = edit { it[Keys.lastSyncedAt] = v }
     suspend fun setUploadKind(v: String) = edit { it[Keys.uploadKind] = v }
+    suspend fun setRecordingsFolder(v: String) = edit { it[Keys.recordingsFolder] = v }
 
     /**
      * Stable per-install id (sync/accounts, v2.0), generated once and persisted

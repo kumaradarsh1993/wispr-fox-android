@@ -297,6 +297,7 @@ class MainActivity : ComponentActivity() {
         }
         if (uris.isEmpty()) return
         WisprFoxApp.container(this).importController.stageSharedUris(uris)
+        AppState.setShareChoicePending(true)
         pendingDeepLink = OPEN_UPLOAD
         share.action = null
     }
