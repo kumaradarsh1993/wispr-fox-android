@@ -79,6 +79,157 @@ class SyncEngine(
         }
     }
 
+    /** What the Refresh consistency check found and fixed. */
+    data class ReconcileReport(
+        val fetched: Int = 0,
+        val updated: Int = 0,
+        val removed: Int = 0,
+        val repushed: Int = 0,
+        val reclaimed: Int = 0,
+        val waiting: Int = 0,
+        val error: String? = null,
+    ) {
+        fun summary(): String {
+            if (error != null) return "Sync check failed: $error"
+            val parts = buildList {
+                if (fetched > 0) add("$fetched new from other devices")
+                if (updated > 0) add("$updated updated")
+                if (removed > 0) add("$removed removed")
+                if (repushed > 0) add("$repushed re-sent from this phone")
+                if (reclaimed > 0) add("$reclaimed repaired")
+                if (waiting > 0) add("$waiting still waiting to send")
+            }
+            return if (parts.isEmpty()) "Everything is in sync." else "Synced: ${parts.joinToString(", ")}."
+        }
+    }
+
+    @kotlinx.serialization.Serializable
+    private data class ServerIndexRow(
+        val id: String,
+        val device_id: String? = null,
+        val updated_at: String? = null,
+        val deleted_at: String? = null,
+    )
+
+    /**
+     * The History Refresh button: a normal sync, then a full comparison of the
+     * server's row list with this phone's. Fetches other devices' rows that are
+     * missing or newer here, removes rows deleted on their own device, takes
+     * back ownership of this phone's rows an older build marked as pulled, and
+     * re-sends this phone's rows the server lacks.
+     */
+    suspend fun reconcile(): ReconcileReport = withContext(Dispatchers.IO) {
+        if (!SupabaseConfig.isConfigured() || !authManager.isSignedIn()) {
+            return@withContext ReconcileReport(error = "Sign in to sync with your other devices.")
+        }
+        val first = syncNow()
+        if (first.isFailure) {
+            return@withContext ReconcileReport(error = first.exceptionOrNull()?.message ?: "Couldn't reach your account.")
+        }
+        mutex.withLock {
+            runCatching {
+                val token = authManager.getValidAccessToken() ?: error("Couldn't reach your account. Try again.")
+                val userId = authManager.state.value.userId ?: error("Couldn't reach your account. Try again.")
+                val deviceId = settingsStore.deviceId()
+
+                val server = mutableListOf<ServerIndexRow>()
+                while (true) {
+                    val url = "${SupabaseConfig.SUPABASE_URL}/rest/v1/notes" +
+                        "?user_id=eq.$userId&select=id,device_id,updated_at,deleted_at&order=id.asc&limit=$INDEX_PAGE&offset=${server.size}"
+                    val page = getJson(url, token, ListSerializer(ServerIndexRow.serializer()))
+                    server += page
+                    if (page.size < INDEX_PAGE) break
+                }
+                val local = recordings.syncIndex().associateBy { it.id }
+                var removed = 0
+                var reclaimed = 0
+                val toFetch = mutableListOf<String>()
+                val onServer = HashSet<String>()
+                for (row in server) {
+                    onServer += row.id
+                    val here = local[row.id]
+                    if (row.device_id == deviceId) {
+                        // Ours, but an older build stored the echo as a pulled row.
+                        if (row.deleted_at == null && here != null && here.remote) {
+                            recordings.reclaimOwnership(row.id)
+                            reclaimed++
+                        }
+                        continue
+                    }
+                    if (row.deleted_at != null) {
+                        if (here != null) { recordings.applyTombstone(row.id); removed++ }
+                        continue
+                    }
+                    val serverMs = SyncTime.toMillis(row.updated_at) ?: 0L
+                    if (here == null || (here.remote && serverMs > here.updatedAt)) toFetch += row.id
+                }
+
+                val missingMine = local.values
+                    .filter { !it.remote && it.status == "done" && !it.dirty && it.id !in onServer }
+                    .map { it.id }
+                if (missingMine.isNotEmpty()) {
+                    recordings.markDirtyIds(missingMine)
+                    pushNotes(token, userId, deviceId)
+                }
+
+                var fetched = 0
+                var updated = 0
+                for (chunk in toFetch.chunked(FETCH_CHUNK)) {
+                    val url = "${SupabaseConfig.SUPABASE_URL}/rest/v1/notes?user_id=eq.$userId&id=in.(${chunk.joinToString(",")})"
+                    for (row in getJson(url, token, ListSerializer(RemoteNote.serializer()))) {
+                        if (applyPulled(row)) { if (local.containsKey(row.id)) updated++ else fetched++ }
+                    }
+                }
+                val waiting = recordings.syncIndex().count { !it.remote && (it.dirty || it.status !in setOf("done", "error")) }
+                settingsStore.setLastSyncedAt(System.currentTimeMillis())
+                ReconcileReport(fetched, updated, removed, missingMine.size, reclaimed, waiting)
+            }.getOrElse { ReconcileReport(error = it.message ?: "Couldn't finish the check.") }
+        }
+    }
+
+    private fun <T> getJson(url: String, token: String, serializer: kotlinx.serialization.KSerializer<T>): T {
+        val request = Request.Builder()
+            .url(url)
+            .header("apikey", SupabaseConfig.SUPABASE_ANON_KEY)
+            .header("Authorization", "Bearer $token")
+            .build()
+        return client.newCall(request).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) error("HTTP ${resp.code}: ${body.take(200)}")
+            json.decodeFromString(serializer, body)
+        }
+    }
+
+    /** Apply one row another device owns. Returns whether it was applied. */
+    private suspend fun applyPulled(row: RemoteNote): Boolean {
+        val createdMs = SyncTime.toMillis(row.created_at) ?: return false
+        val updatedMs = SyncTime.toMillis(row.updated_at) ?: createdMs
+        val before = recordings.syncIndex().firstOrNull { it.id == row.id }?.updatedAt
+        recordings.applyRemoteNote(row.toPulled(createdMs, updatedMs))
+        return before == null || updatedMs > before
+    }
+
+    private fun RemoteNote.toPulled(createdMs: Long, updatedMs: Long) = RemotePulledNote(
+        id = id,
+        platform = platform,
+        origin = origin,
+        title = title,
+        transcript = transcript,
+        cleanedText = cleaned_text,
+        draftedText = drafted_text,
+        meetingNotesText = meeting_notes_text,
+        speakerTurns = speaker_turns,
+        speakerNames = speaker_names,
+        isMeeting = is_meeting,
+        diarizationEnabled = diarization_enabled,
+        durationMs = duration_ms,
+        sttProvider = stt_provider,
+        llmProvider = llm_provider,
+        createdAtMillis = createdMs,
+        updatedAtMillis = updatedMs,
+        deletedAtMillis = SyncTime.toMillis(deleted_at),
+    )
+
     /** Best-effort cloud tombstone for "delete everywhere" — wired into
      *  [RecordingRepository] as a lambda so that package stays sync-agnostic.
      *  Scoped to this device with `&device_id=eq.<deviceId>` (SYNC_DESIGN.md
@@ -311,7 +462,10 @@ class SyncEngine(
 
     private suspend fun pullNotes(token: String, userId: String) {
         val cursorMillis = syncMetaDao.getLong(SyncMetaKeys.NOTES_CURSOR) ?: 0L
-        val cursorIso = SyncTime.toIso(cursorMillis)
+        // Every client stamps updated_at with its own clock, so a row from a
+        // device whose clock runs behind can land below our cursor. Re-read a
+        // 15-minute overlap; applyRemoteNote skips rows already applied.
+        val cursorIso = SyncTime.toIso((cursorMillis - PULL_OVERLAP_MS).coerceAtLeast(0L))
         val url = "${SupabaseConfig.SUPABASE_URL}/rest/v1/notes" +
             "?user_id=eq.$userId&updated_at=gt.$cursorIso&order=updated_at.asc"
         val request = Request.Builder()
@@ -325,9 +479,20 @@ class SyncEngine(
             runCatching { json.decodeFromString(ListSerializer(RemoteNote.serializer()), bodyStr) }.getOrDefault(emptyList())
         }
         var maxSeen = cursorMillis
+        val myDeviceId = settingsStore.deviceId()
         for (row in rows) {
             val createdMs = SyncTime.toMillis(row.created_at) ?: continue
             val updatedMs = SyncTime.toMillis(row.updated_at) ?: createdMs
+            if (updatedMs > maxSeen) maxSeen = updatedMs
+            // Our own row echoing back from our push. This phone's copy is the
+            // original: it has the audio and it owns the row. Applying the echo
+            // used to overwrite it as a pulled row (remote, no audio), which
+            // stopped every later edit from being pushed and greyed out Rerun.
+            // Only speaker names can legitimately change elsewhere.
+            if (row.device_id == myDeviceId) {
+                if (row.deleted_at == null) recordings.applyRemoteSpeakerNames(row.id, row.speaker_names)
+                continue
+            }
             recordings.applyRemoteNote(
                 RemotePulledNote(
                     id = row.id,
@@ -350,7 +515,6 @@ class SyncEngine(
                     deletedAtMillis = SyncTime.toMillis(row.deleted_at),
                 )
             )
-            if (updatedMs > maxSeen) maxSeen = updatedMs
         }
         if (maxSeen > cursorMillis) syncMetaDao.setLong(SyncMetaKeys.NOTES_CURSOR, maxSeen)
     }
@@ -434,5 +598,11 @@ class SyncEngine(
 
     companion object {
         private val JSON_MEDIA = "application/json".toMediaType()
+        /** How far behind the pull cursor each pull re-reads (see pullNotes). */
+        private const val PULL_OVERLAP_MS = 15 * 60 * 1000L
+        /** Ids per `id=in.(...)` fetch, small enough to keep the URL short. */
+        private const val FETCH_CHUNK = 40
+        /** PostgREST's default page size on Supabase. */
+        private const val INDEX_PAGE = 1000
     }
 }

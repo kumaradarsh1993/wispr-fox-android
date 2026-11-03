@@ -480,6 +480,10 @@ class RecordingRepository(
             applyTombstone(note.id)
             return
         }
+        // Never replace a row this phone made: it holds the audio and owns
+        // the row. (SyncEngine already skips our own echoes; this guards any
+        // other path.)
+        if (dao.ownedAmong(listOf(note.id)).isNotEmpty()) return
         val localUpdatedAt = dao.getUpdatedAt(note.id)
         if (localUpdatedAt != null && localUpdatedAt >= note.updatedAtMillis) return
 
@@ -520,6 +524,22 @@ class RecordingRepository(
     /** A row is gone everywhere: remove it locally (row + WAV, same effect as
      *  a local delete) so this client converges with the tombstone. */
     suspend fun applyTombstone(id: String) = delete(id)
+
+    /** Speaker names on a row this phone owns, edited on another device. */
+    suspend fun applyRemoteSpeakerNames(id: String, names: String?) {
+        dao.applySpeakerNamesIfClean(id, names)
+    }
+
+    suspend fun syncIndex(): List<SyncIndexRow> = dao.syncIndex()
+
+    /** This phone made the row; an older build's sync marked it as pulled. */
+    suspend fun reclaimOwnership(id: String) = dao.setOwned(id)
+
+    /** Mark rows as needing a push (the server has lost them). */
+    suspend fun markDirtyIds(ids: List<String>) {
+        val now = System.currentTimeMillis()
+        ids.forEach { dao.markDirty(it, now) }
+    }
 
     /**
      * Ownership-scoped delete (SYNC_DESIGN.md "Delete — ownership-scoped").

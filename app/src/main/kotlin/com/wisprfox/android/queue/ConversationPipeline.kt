@@ -205,7 +205,19 @@ internal class ConversationPipeline(
         }
 
         // ── Finish ──────────────────────────────────────────────────────────
+        val anyContent = ConversationPasses.hasResult(doc, ConversationPass.SPEAKERS, notesText) ||
+            ConversationPasses.hasResult(doc, ConversationPass.ACCURACY, notesText) ||
+            !notesText.isNullOrBlank()
         if (transient && attempt < maxAttempts) {
+            // A step hit a network error and will retry in the background. If
+            // other steps already produced something, the row is usable now:
+            // mark it done so it syncs and edits made meanwhile (speaker
+            // names) reach other devices. Only DONE rows are pushed, so a
+            // conversation waiting on a retry used to never sync at all.
+            if (anyContent) {
+                recordings.setStatus(id, RecordingStatus.DONE)
+                SyncWorker.enqueueOnce(context)
+            }
             recordings.bumpRetry(id)
             if (AppState.state.value.activeRecordingId == id) {
                 AppState.update {
@@ -220,9 +232,6 @@ internal class ConversationPipeline(
             return ListenableWorker.Result.retry()
         }
 
-        val anyContent = ConversationPasses.hasResult(doc, ConversationPass.SPEAKERS, notesText) ||
-            ConversationPasses.hasResult(doc, ConversationPass.ACCURACY, notesText) ||
-            !notesText.isNullOrBlank()
         if (!anyContent) {
             val message = failures.firstOrNull() ?: "Couldn't process this conversation."
             recordings.setError(id, message)

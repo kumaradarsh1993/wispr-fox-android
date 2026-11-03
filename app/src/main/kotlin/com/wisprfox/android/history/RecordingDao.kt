@@ -156,6 +156,19 @@ interface RecordingDao {
     @Query("SELECT updated_at FROM recordings WHERE id = :id")
     suspend fun getUpdatedAt(id: String): Long?
 
+    /** Every row's sync identity, for the Refresh consistency check. */
+    @Query("SELECT id, remote, status, dirty, updated_at AS updatedAt FROM recordings")
+    suspend fun syncIndex(): List<SyncIndexRow>
+
+    /** Take back ownership of a row this phone made (see SyncEngine.reconcile). */
+    @Query("UPDATE recordings SET remote = 0 WHERE id = :id")
+    suspend fun setOwned(id: String)
+
+    /** Speaker names edited on another device, for a row this phone owns.
+     *  Skipped while this phone has unpushed edits of its own. */
+    @Query("UPDATE recordings SET speaker_names = :names WHERE id = :id AND dirty = 0 AND (speaker_names IS NOT :names)")
+    suspend fun applySpeakerNamesIfClean(id: String, names: String?): Int
+
     @Query("UPDATE recordings SET platform = :platform, device_name = :deviceName WHERE id = :id")
     suspend fun setDeviceLabel(id: String, platform: String, deviceName: String?)
 
