@@ -6,6 +6,10 @@ import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.RadioButton
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -179,20 +183,61 @@ fun StorageSpoke(onBack: () -> Unit) {
     val settings by container.settingsStore.settings.collectAsState(initial = AppSettings())
     var storage by remember { mutableStateOf(com.wisprfox.android.history.RecordingRepository.AudioStorage(0, 0)) }
     var confirmClearAudio by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
+    // Copies of shared/picked files waiting to be converted. Each one is
+    // deleted once its recording is converted; anything here is left over
+    // from an import that was abandoned or failed.
+    var copies by remember { mutableStateOf(0 to 0L) }
+    suspend fun reload() {
         val recorded = container.recordings.audioStorage()
-        val staged = container.importController.stagedStorage()
-        storage = com.wisprfox.android.history.RecordingRepository.AudioStorage(recorded.files + staged.first, recorded.bytes + staged.second)
+        storage = recorded
+        copies = container.importController.stagedStorage()
     }
+    LaunchedEffect(Unit) { reload() }
 
     SpokeScaffold("Storage", onBack) {
-        SectionCard("On this phone") {
-            Text("${storage.files} audio file${if (storage.files == 1) "" else "s"} · ${formatStorage(storage.bytes)}",
+        SectionCard("Recordings kept for re-runs") {
+            Text("${storage.files} file${if (storage.files == 1) "" else "s"} · ${formatStorage(storage.bytes)}",
                 style = MaterialTheme.typography.bodyLarge)
-            Text("Transcripts stay when local audio is cleared.", style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Compressed copies of your recordings, so Rerun works. Transcripts stay when you clear them.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             OutlinedButton(onClick = { confirmClearAudio = true }, enabled = storage.files > 0, modifier = Modifier.fillMaxWidth()) {
-                Text("Clear local audio")
+                Text("Clear kept recordings")
+            }
+        }
+        SectionCard("Copies of shared files") {
+            Text("${copies.first} file${if (copies.first == 1) "" else "s"} · ${formatStorage(copies.second)}",
+                style = MaterialTheme.typography.bodyLarge)
+            Text("Files you shared or picked are copied in first, then deleted once converted. Your originals in Voice Recorder are never touched.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            OutlinedButton(
+                onClick = { scope.launch { container.importController.cancelQueuedWorkAndClearSources(); reload() } },
+                enabled = copies.first > 0,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Delete copies (cancels uploads not yet started)") }
+        }
+        SectionCard("Recordings folder") {
+            val canRead = com.wisprfox.android.core.RecentRecordings.hasPermission(ctx)
+            var folders by remember { mutableStateOf<List<String>>(emptyList()) }
+            LaunchedEffect(canRead) {
+                folders = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.wisprfox.android.core.RecentRecordings.audioFolders(ctx)
+                }
+            }
+            Text(settings.recordingsFolder.ifBlank { "Any folder" }, style = MaterialTheme.typography.bodyLarge)
+            Text("Upload shows the 3 newest recordings from here.", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (!canRead) {
+                Text("Open Upload and tap \"Show my latest recordings\" to allow access, then pick a folder here.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            (listOf("") + folders).distinct().forEach { f ->
+                Row(
+                    Modifier.fillMaxWidth().clickable { scope.launch { container.settingsStore.setRecordingsFolder(f) } },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(selected = settings.recordingsFolder == f, onClick = { scope.launch { container.settingsStore.setRecordingsFolder(f) } })
+                    Text(f.ifBlank { "Any folder" }, style = MaterialTheme.typography.bodyMedium)
+                }
             }
         }
         SectionCard("Keep audio for") {
@@ -239,12 +284,7 @@ fun StorageSpoke(onBack: () -> Unit) {
             scope.launch {
                 container.importController.cancelQueuedWorkAndClearSources()
                 container.recordings.clearAllAudio()
-                val recorded = container.recordings.audioStorage()
-                val staged = container.importController.stagedStorage()
-                storage = com.wisprfox.android.history.RecordingRepository.AudioStorage(
-                    recorded.files + staged.first,
-                    recorded.bytes + staged.second,
-                )
+                reload()
             }
         }) { Text("Clear audio") } },
         dismissButton = { TextButton(onClick = { confirmClearAudio = false }) { Text("Cancel") } },
