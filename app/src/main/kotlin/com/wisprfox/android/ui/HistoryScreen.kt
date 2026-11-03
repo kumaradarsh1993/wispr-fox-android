@@ -28,6 +28,10 @@ import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import com.wisprfox.android.core.AppState
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
@@ -134,6 +138,7 @@ fun HistoryScreen(
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     val selected = remember { mutableStateMapOf<String, Boolean>() }
     var menuOpen by remember { mutableStateOf(false) }
+    var syncing by remember { mutableStateOf(false) }
     var confirmDeleteAll by remember { mutableStateOf(false) }
     var confirmDeleteSelected by remember { mutableStateOf(false) }
     var expandedIds by rememberSaveable { mutableStateOf(emptySet<String>()) }
@@ -198,6 +203,20 @@ fun HistoryScreen(
                             )
                         }
                     } else {
+                        // Refresh: reload and run the full sync check against
+                        // the server and your other devices.
+                        IconButton(onClick = {
+                            if (!syncing) {
+                                syncing = true
+                                scope.launch {
+                                    val report = container.syncEngine.reconcile()
+                                    syncing = false
+                                    AppState.toast(report.summary(), isError = report.error != null)
+                                }
+                            }
+                        }, enabled = !syncing) {
+                            Icon(Icons.Filled.Sync, contentDescription = "Refresh and check sync")
+                        }
                         IconButton(onClick = { searchOpen = !searchOpen; if (!searchOpen) query = "" }) {
                             Icon(Icons.Filled.Search, contentDescription = if (searchOpen) "Close search" else "Search")
                         }
@@ -423,11 +442,13 @@ private fun HistoryRow(
                 }
                 // Copy is the primary recovery action; playback moves into the
                 // compact expanded action row.
-                if (!selectMode) {
+                // Collapsed: one Copy on the right. Expanded: Copy moves onto the
+                // tab row with Read and Rerun, so it isn't shown twice.
+                if (!selectMode && !expanded) {
                     IconButton(onClick = {
                         rec.primaryText()?.let { container.delivery.copyToClipboard(SpeakerTurnsCodec.applyNames(it, rec.speakerNames)) }
-                    }) {
-                        Icon(Icons.Filled.ContentCopy, contentDescription = "Copy")
+                    }, modifier = Modifier.size(Sizes.iconButton)) {
+                        Icon(Icons.Filled.ContentCopy, contentDescription = "Copy", modifier = Modifier.size(Sizes.actionIcon))
                     }
                 }
             }
@@ -437,39 +458,36 @@ private fun HistoryRow(
                     Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, maxLines = 2)
                 }
             } else if (!selectMode) {
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
-                    TabChip("Raw", tab == Tab.RAW) { tab = Tab.RAW }
-                    TabChip("Clean", tab == Tab.CLEANED) { tab = Tab.CLEANED }
-                    TabChip("Draft", tab == Tab.REFORMATTED) { tab = Tab.REFORMATTED }
-                    if (rec.isMeeting || rec.meetingNotesText != null) {
-                        TabChip("Meeting", tab == Tab.MEETING) { tab = Tab.MEETING }
-                    }
-                }
-
                 val text = when (tab) {
                     Tab.RAW -> SpeakerTurnsCodec.render(rec.speakerTurns, rec.speakerNames).ifBlank { rec.transcript.orEmpty() }
                     Tab.CLEANED -> rec.cleanedText
                     Tab.REFORMATTED -> rec.draftedText
                     Tab.MEETING -> rec.meetingNotesText
                 }?.let { SpeakerTurnsCodec.applyNames(it, rec.speakerNames) }
+                val hasText = text != null && text.isNotBlank()
 
-                if (text != null && text.isNotBlank()) {
-                    ReadableText(text, meeting = tab == Tab.MEETING)
-                    Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
-                    TextButton(onClick = { container.delivery.copyToClipboard(text) }) {
-                        Icon(Icons.Filled.ContentCopy, contentDescription = null)
-                        Spacer(Modifier.size(Space.xs))
-                        Text("Copy")
+                // Tabs on the left, the card's actions as small icons on the
+                // right of the same row (Nov 2026: Rerun used to wrap onto its
+                // own line with space to spare).
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
+                        TabChip("Raw", tab == Tab.RAW) { tab = Tab.RAW }
+                        TabChip("Clean", tab == Tab.CLEANED) { tab = Tab.CLEANED }
+                        TabChip("Draft", tab == Tab.REFORMATTED) { tab = Tab.REFORMATTED }
+                        if (rec.isMeeting || rec.meetingNotesText != null) {
+                            TabChip("Notes", tab == Tab.MEETING) { tab = Tab.MEETING }
+                        }
                     }
-                    TextButton(onClick = { showReader = true }) {
-                        Icon(Icons.Filled.Fullscreen, contentDescription = null)
-                        Text(" Read")
+                    SmallAction(Icons.Filled.ContentCopy, "Copy", enabled = hasText) { text?.let { container.delivery.copyToClipboard(it) } }
+                    SmallAction(Icons.Filled.Fullscreen, "Read", enabled = hasText) { showReader = true }
+                    if (hasLocalAudio || !rec.transcript.isNullOrBlank()) {
+                        SmallAction(Icons.Filled.Refresh, if (isError) "Retry" else "Rerun") { showRerun = true }
                     }
-                    if (rec.isMeeting) TextButton(onClick = { showSpeakers = true }) {
-                        Icon(Icons.Filled.People, contentDescription = null)
-                        Text(" Speakers")
-                    }
-                    }
+                    if (rec.isMeeting) SmallAction(Icons.Filled.People, "Name speakers") { showSpeakers = true }
+                }
+
+                if (hasText) {
+                    ReadableText(text!!, meeting = tab == Tab.MEETING)
                 } else if (tab == Tab.RAW) {
                     Text(
                         "No transcript yet — tap Retry to run it.",
@@ -511,24 +529,6 @@ private fun HistoryRow(
                             onClick = { player.toggle(rec.audioPath) },
                             label = { Text(if (playing) "Stop" else "Play") },
                             leadingIcon = { Icon(if (playing) Icons.Filled.Stop else Icons.Filled.PlayArrow, null) },
-                        )
-                    }
-                    if (hasLocalAudio || !rec.transcript.isNullOrBlank()) {
-                        AssistChip(
-                            onClick = {
-                                // Same pattern as desktop's retry(): if the row's
-                                // not an error, confirm before nuking existing
-                                // text. If it IS an error, fire immediately —
-                                // that's the whole point of retry.
-                                showRerun = true
-                            },
-                            label = { Text(if (isError) "Retry" else "Re-run") },
-                            leadingIcon = { Icon(Icons.Filled.Refresh, contentDescription = null) },
-                            colors = if (isError) AssistChipDefaults.assistChipColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                labelColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                leadingIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                            ) else AssistChipDefaults.assistChipColors(),
                         )
                     }
                     // Delete only appears on rows this device owns — a remote row
@@ -712,6 +712,9 @@ private fun FocusReader(
                 ) {
                     Text(rec.title ?: rec.sourceName ?: "Recording", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                     ReadableText(text, meeting = label == "Meeting Notes")
+                    // Room past the last line so it can be scrolled clear of the
+                    // gesture bar instead of sitting under it.
+                    Spacer(Modifier.navigationBarsPadding().height(Space.xxl * 3))
                 }
             }
         }
@@ -814,6 +817,14 @@ private fun RerunDialog(
                 verticalArrangement = Arrangement.spacedBy(Space.sm),
             ) {
                 Text("1 · Speech", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                if (!canTranscribe) {
+                    Text(
+                        if (rec.remote) "Audio for this note is on ${rec.platformLabel()}. Transcribe and Label speakers need the audio, so only the text steps below can run here."
+                        else "The audio for this note was cleared from this phone (Settings → Storage), so only the text steps below can run.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 RerunChoice(
                     "Transcription",
                     "${ProviderCatalog.label(sttProvider)} · ${ProviderCatalog.shortModel(sttModel)}",
@@ -974,6 +985,18 @@ private fun ConfirmDialog(
         confirmButton = { Button(onClick = onConfirm) { Text(confirm) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+@Composable
+private fun SmallAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(Sizes.iconButton)) {
+        Icon(icon, contentDescription = label, modifier = Modifier.size(Sizes.actionIcon))
+    }
 }
 
 @Composable
