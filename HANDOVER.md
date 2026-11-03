@@ -1,6 +1,8 @@
 # HANDOVER - wispr-fox-android
 
-> Last update: 2026-10-19. Current stable: **v2.1.0** (accounts + cross-device sync, UI redesign/dark theme, ownership-scoped delete + Purge). The current candidate is **v2.2.0-nightly.5** (`versionName = "2.2.0-nightly.5"`, `versionCode = 22`), published by CI. It is nightly.4 plus the phone->other-device sync fix. nightly.4 = nightly.2 plus the Supabase DNS-over-HTTPS fix, 16 kHz import downsample + one-tap Quick transcribe, and a model-catalog refresh (Groq default GPT-OSS 20B replacing the dead Llama 3.3 70B, GPT-5.6 family, Qwen 3.8 replacing the retired 3.6, Gemini 3.8 default with retired 3.7/3.5 Flash removed, Groq reasoning handling). `v2.2.0-nightly.3` is a failed CI tag with no release (DNS code did not compile) — ignore it. **Do not promote to stable until S23 Ultra device QA passes.** The older delete/purge PostgREST paths also remain runtime-unverified.
+> **Last update: 2026-11-03.** Stable/Latest is **v2.3.0** (Conversations). The current nightly is **v2.4.0-nightly.1** (`versionCode = 26`), the revamp below, on branch `revamp`. Branch builds via `workflow_dispatch` always fail at "Publish GitHub release" (it needs a tag); only "Test and build release APK" matters for a compile check. The older paragraph that follows is history.
+>
+> Previous header (2026-10-19): Current stable: **v2.1.0** (accounts + cross-device sync, UI redesign/dark theme, ownership-scoped delete + Purge). The current candidate is **v2.2.0-nightly.5** (`versionName = "2.2.0-nightly.5"`, `versionCode = 22`), published by CI. It is nightly.4 plus the phone->other-device sync fix. nightly.4 = nightly.2 plus the Supabase DNS-over-HTTPS fix, 16 kHz import downsample + one-tap Quick transcribe, and a model-catalog refresh (Groq default GPT-OSS 20B replacing the dead Llama 3.3 70B, GPT-5.6 family, Qwen 3.8 replacing the retired 3.6, Gemini 3.8 default with retired 3.7/3.5 Flash removed, Groq reasoning handling). `v2.2.0-nightly.3` is a failed CI tag with no release (DNS code did not compile) — ignore it. **Do not promote to stable until S23 Ultra device QA passes.** The older delete/purge PostgREST paths also remain runtime-unverified.
 
 This file is the current state-of-the-world for Android. `CLAUDE.md` is useful historical context, but this handover wins when they disagree. The full audit + rationale behind the v1.3.0 batch lives in `docs/AUDIT_2026-07-06_FABLE.md` — read it before touching overlay/delivery/pipeline code. The 2026-07-17 UX/UI audit that drove the v2.1.0 redesign is `docs/AUDIT_2026-07-17_ANDROID.md`.
 
@@ -13,6 +15,19 @@ wispr-fox is three clients sharing one Supabase backend. Keep this block in sync
 - **Android** — `./HANDOVER.md` (Kotlin + Jetpack Compose) ← you are here
 
 Shared backend spec: `../wispr-fox-web/docs/SYNC_DESIGN.md` · one-time account/backend setup: `../wispr-fox-web/SETUP_ACCOUNTS.md` (secrets in the gitignored `../wispr-fox-web/SECRETS.local.md`).
+
+## v2.4.0-nightly.1 — revamp around Voice Recorder uploads (2026-11-03)
+
+Brief (verbatim): `../wispr-fox/docs/briefs/2026-11-03 brief - sync check and Android revamp.md`. Plan: `docs/REVAMP_2026-11.md`. Notes: `docs/RELEASE_NOTES_v2.4.0-nightly.1.md`. **Not yet run on the S23 Ultra.**
+
+- **Dictate into other apps is opt-in** (`AppSettings.dictateIntoApps`, default false; switch on Speak). Off: `OverlayService` stopped and `WisprFoxAccessibilityService.turnOff()` calls `disableSelf()`. Banking apps (ICICI iMobile) warn while any accessibility service is enabled, so hiding the fox alone was never enough. Turning accessibility on anywhere sets the switch back on. `OverlayVisibility.SENSITIVE_PACKAGES` keeps the fox off banking/payment apps (read from `rootInActiveWindow.packageName`, never the IME).
+- **Lean UI:** `TYPE_SCALE = 0.9` in `Theme.kt`; smaller `Space`/`Sizes` tokens; new `Sizes.iconButton` (40 dp) / `actionIcon` (18 dp).
+- **Nav:** Speak / Upload / History / Settings (`NavTab.SETTINGS`). Conversations is `HistoryKindSwitch` at the top of History; `NavTab.CONVERSATIONS` still routes and highlights History.
+- **Upload:** `UploadOptions` with presets (`UploadKind` VOICE_NOTE = Transcript, CONVERSATION = Meeting, new CUSTOM). Recent 3 from MediaStore (`core/RecentRecordings.kt`, `READ_MEDIA_AUDIO`), folder in `AppSettings.recordingsFolder` (default `Recordings/Voice Recorder/`). A share sets `AppState.shareChoicePending`, which shows the two-button sheet.
+- **Copy both transcripts:** `ConversationExport.bothTranscripts` + `TRANSCRIPT_SEPARATOR`; Meeting auto-copy = notes (if any) + both.
+- **History:** small actions on the tab row; Refresh calls `SyncEngine.reconcile()`; Rerun explains missing audio.
+- **Storage:** kept recordings vs leftover copies (`ImportController.stagedStorage`, delete = `cancelQueuedWorkAndClearSources`); folder picker.
+- **Sync fixes:** `pullNotes` skipped nothing for our own rows and `applyRemoteNote` replaced them as remote rows without audio (now own echoes only take speaker names; `applyRemoteNote` refuses owned rows; reconcile reclaims rows already damaged). A conversation waiting on a transient retry is marked `done` when it has content, so it syncs. Pull re-reads a 15-minute overlap.
 
 ## v2.2.0-nightly.5 — phone transcripts never reached other devices (2026-10-19)
 

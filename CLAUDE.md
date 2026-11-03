@@ -1,6 +1,8 @@
 # Base prompt — read this FIRST
 
-> ## 🟢 CURRENT STATE — see HANDOVER (this block last touched 2026-10-19)
+> ## 🟢 CURRENT STATE (2026-11-03): stable **v2.3.0**, nightly **v2.4.0-nightly.1** (the revamp: opt-in "Dictate into other apps" that switches accessibility off for banking apps, Speak/Upload/History/Settings, Upload presets with the 3 newest recordings, both-transcript copy, Refresh sync check). Details in HANDOVER.md. The paragraph below is the previous state.
+>
+> ## Previous state — see HANDOVER (this block last touched 2026-10-19)
 >
 > Current stable is **v2.1.0** (promoted 2026-07-18). **v2.2.0-nightly.5** (`versionCode = 22`, 2026-10-19) is the current candidate: the meeting/share/readability pass from nightly.2, Supabase DNS-over-HTTPS (Indian ISPs block `*.supabase.co`), 16 kHz import + Quick transcribe, a current model catalog, and the fix for phone transcripts never syncing out (PostgREST bulk insert needs identical keys per object). It must remain nightly until S23 Ultra QA passes. No JDK/SDK on the authoring Mac — CI (`android-apk-release.yml`) is the only compile check. The delete/purge round-trips from v2.1.0 also remain runtime-unverified. **[HANDOVER.md](./HANDOVER.md) is the single source of truth** for what ships today, what's queued, and how to resume — read it first; it wins over this file wherever they disagree.
 >
